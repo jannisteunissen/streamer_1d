@@ -9,7 +9,6 @@ CLEANSRC	:= $(SRC_DIRS:%=clean-%)
 all: 		$(SRC_DIRS) | $(CREATE_DIRS)
 
 clean: 		$(CLEANSRC)
-		$(RM) -f $(PROGNAME)
 
 $(SRC_DIRS):
 		$(MAKE) -C $@

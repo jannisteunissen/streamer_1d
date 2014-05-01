@@ -174,7 +174,7 @@ contains
          call CS_write_all("output/" // trim(sim_name) // "_cs.txt")
          call PM_initialize(cross_secs, CFG_get_int("init_num_part"))
       case (MODEL_fluid_lfa, MODEL_fluid_ee)
-         call FL_init_cfg(sim_type, CFG_get_string("fluid_input_file"), &
+         call FL_init_cfg(sim_type, "input/" // CFG_get_string("fluid_input_file"), &
               CFG_get_string("gas_mixture_name"))
       end select
 

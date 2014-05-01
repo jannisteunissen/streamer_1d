@@ -18,7 +18,7 @@ LIBS	:= part_core fluid_core fosito
 all: ../streamer_1d
 
 clean:
-	$(RM) -f *.o *.mod ../streamer_1d
+	$(RM) *.o *.mod ../streamer_1d
 
 # Dependency information
 m_fluid_dd_1d.o: 	m_efield_1d.o m_init_cond_1d.o m_model_choice.o

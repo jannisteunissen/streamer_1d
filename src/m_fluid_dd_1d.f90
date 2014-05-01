@@ -31,18 +31,19 @@ module m_fluid_dd_1d
 
 contains
 
-   subroutine FL_init_cfg(sim_type)
+   subroutine FL_init_cfg(sim_type, input_file, gas_name)
       use m_transport_data
       use m_init_cond_1d
       use m_config
       use m_model_choice
       use m_efield_1d
 
-      integer, intent(in)    :: sim_type
-      integer, parameter     :: nameLen = 80
-      integer                :: n, table_size
-      real(dp)               :: max_energy, max_efield, xx
-      real(dp), allocatable  :: x_data(:), y_data(:)
+      integer, intent(in)          :: sim_type
+      character(len=*), intent(in) :: input_file, gas_name
+      integer, parameter           :: nameLen = 80
+      integer                      :: n, table_size
+      real(dp)                     :: max_energy, max_efield, xx
+      real(dp), allocatable        :: x_data(:), y_data(:)
 
       FL_transport_scheme => TS_dd_1d_up_fl
 
@@ -85,54 +86,65 @@ contains
       if (FL_use_en) then
          FL_lkp_en = LT_create_mcol(0.0_dp, max_energy, table_size, 0)
 
-         call TD_get_data(trim(CFG_get_string("fluid_en_loss")), x_data, y_data)
+         call TD_get_td_from_file(input_file, gas_name, &
+              trim(CFG_get_string("fluid_en_loss")), x_data, y_data)
          call LT_add_col(FL_lkp_en, x_data, y_data)
          FL_ie_loss = LT_get_num_cols(FL_lkp_en)
       end if
 
       if (FL_use_en_mob) then
-         call TD_get_data(trim(CFG_get_string("fluid_en_mob")), x_data, y_data)
+         call TD_get_td_from_file(input_file, gas_name, &
+              trim(CFG_get_string("fluid_en_mob")), x_data, y_data)
          call LT_add_col(FL_lkp_en, x_data, y_data)
          FL_ie_mob = LT_get_num_cols(FL_lkp_en)
       else
-         call TD_get_data(trim(CFG_get_string("fluid_fld_mob")), x_data, y_data)
+         call TD_get_td_from_file(input_file, gas_name, &
+              trim(CFG_get_string("fluid_fld_mob")), x_data, y_data)
          call LT_add_col(FL_lkp_fld, x_data, y_data)
          FL_if_mob = LT_get_num_cols(FL_lkp_fld)
       end if
 
       if (FL_use_en_dif) then
-         call TD_get_data(trim(CFG_get_string("fluid_en_dif")), x_data, y_data)
+         call TD_get_td_from_file(input_file, gas_name, &
+              trim(CFG_get_string("fluid_en_dif")), x_data, y_data)
          call LT_add_col(FL_lkp_en, x_data, y_data)
          FL_ie_dif = LT_get_num_cols(FL_lkp_en)
       else
-         call TD_get_data(trim(CFG_get_string("fluid_fld_dif")), x_data, y_data)
+         call TD_get_td_from_file(input_file, gas_name, &
+              trim(CFG_get_string("fluid_fld_dif")), x_data, y_data)
          call LT_add_col(FL_lkp_fld, x_data, y_data)
          FL_if_dif = LT_get_num_cols(FL_lkp_fld)
       end if
 
       if (FL_use_en_src) then
-         call TD_get_data(trim(CFG_get_string("fluid_en_alpha")), x_data, y_data)
+         call TD_get_td_from_file(input_file, gas_name, &
+              trim(CFG_get_string("fluid_en_alpha")), x_data, y_data)
          call LT_add_col(FL_lkp_en, x_data, y_data)
          FL_ie_src = LT_get_num_cols(FL_lkp_en)
-         call TD_get_data(trim(CFG_get_string("fluid_en_eta")), x_data, y_data)
+         call TD_get_td_from_file(input_file, gas_name, &
+              trim(CFG_get_string("fluid_en_eta")), x_data, y_data)
          call LT_add_col(FL_lkp_en, x_data, y_data)
          FL_ie_att = LT_get_num_cols(FL_lkp_en)
       else
-         call TD_get_data(trim(CFG_get_string("fluid_fld_alpha")), x_data, y_data)
+         call TD_get_td_from_file(input_file, gas_name, &
+              trim(CFG_get_string("fluid_fld_alpha")), x_data, y_data)
          call LT_add_col(FL_lkp_fld, x_data, y_data)
          FL_if_src = LT_get_num_cols(FL_lkp_fld)
-         call TD_get_data(trim(CFG_get_string("fluid_fld_eta")), x_data, y_data)
+         call TD_get_td_from_file(input_file, gas_name, &
+              trim(CFG_get_string("fluid_fld_eta")), x_data, y_data)
          call LT_add_col(FL_lkp_fld, x_data, y_data)
          FL_if_att = LT_get_num_cols(FL_lkp_fld)
       end if
 
       if (FL_use_detach) then
-         call TD_get_data(trim(CFG_get_string("fluid_fld_det")), x_data, y_data)
+         call TD_get_td_from_file(input_file, gas_name, &
+              trim(CFG_get_string("fluid_fld_det")), x_data, y_data)
          call LT_add_col(FL_lkp_fld, x_data, y_data)
          FL_if_det= LT_get_num_cols(FL_lkp_fld)
       end if
 
-      call TD_get_data(trim(CFG_get_string("fluid_fld_en")), x_data, y_data)
+      call TD_get_td_from_file(input_file, gas_name, &
+           trim(CFG_get_string("fluid_fld_en")), x_data, y_data)
       call LT_add_col(FL_lkp_fld, x_data, y_data)
       FL_if_en = LT_get_num_cols(FL_lkp_fld)
 

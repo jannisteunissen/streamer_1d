@@ -24,7 +24,7 @@ program streamer_1d
    implicit none
 
    integer, parameter :: dp = kind(0.0d0)
-   character(len=80) :: sim_name, fluid_input_file, gas_mix_name
+   character(len=80) :: sim_name
 
    integer           :: sim_type
    integer           :: steps, n_steps_apm
@@ -174,11 +174,8 @@ contains
          call CS_write_all("output/" // trim(sim_name) // "_cs.txt")
          call PM_initialize(cross_secs, CFG_get_int("init_num_part"))
       case (MODEL_fluid_lfa, MODEL_fluid_ee)
-         call CFG_get("fluid_input_file", fluid_input_file)
-         call CFG_get("gas_mixture_name", gas_mix_name)
-         call TD_read_file("input/" // trim(fluid_input_file), trim(gas_mix_name))
-
-         call FL_init_cfg(sim_type)
+         call FL_init_cfg(sim_type, CFG_get_string("fluid_input_file"), &
+              CFG_get_string("gas_mixture_name"))
       end select
 
    end subroutine initialize_all

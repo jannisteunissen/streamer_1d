@@ -22,7 +22,6 @@ def get_file_number(sim_name, file_name):
 if __name__ == '__main__':
     args = get_args()
 
-    os.chdir("output")
     all_files = glob.glob(args.name + "*.txt")
 
     # Select numbered files, e.g., sim_part_12.txt etc

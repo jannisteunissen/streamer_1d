@@ -37,4 +37,5 @@ if __name__ == '__main__':
         edens_ch = numpy.ma.masked_array(data[:,2],
                                       mask=(efield > float(args.Ech)))
 
-        print sim_data_files[ix][0], edens_ch.mean()
+        print "file #" + str(sim_data_files[ix][0]) +\
+            " - n_ch: " + str(edens_ch.mean())

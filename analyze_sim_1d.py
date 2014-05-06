@@ -10,6 +10,8 @@ from subprocess import call
 def get_args():
     parser = argparse.ArgumentParser(description='Analyze streamer_1d simulations', prog='analyze_sim_1d.py')
     parser.add_argument('name', type=str, help='simulation name')
+    # parser.add_argument('-ot', type=float, default=1.0, help='output interval')
+    parser.add_argument('-Ech', type=float, default=1.0e3, help='E-field in channel')
     return parser.parse_args()
 
 def get_file_number(sim_name, file_name):
@@ -30,5 +32,9 @@ if __name__ == '__main__':
     n_files = len(sim_data_files)
 
     for ix in range(n_files):
-        with open(sim_data_files[ix][1]) as f:
-            print this_file
+        data = numpy.loadtxt(sim_data_files[ix][1])
+        efield = data[:,1]
+        edens_ch = numpy.ma.masked_array(data[:,2],
+                                      mask=(efield > float(args.Ech)))
+
+        print sim_data_files[ix][0], edens_ch.mean()

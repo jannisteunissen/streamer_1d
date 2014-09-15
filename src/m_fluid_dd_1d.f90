@@ -3,6 +3,7 @@
 module m_fluid_dd_1d
    use m_lookup_table
    use m_transport_schemes
+   use m_phys_domain
 
    implicit none
    private
@@ -15,12 +16,10 @@ module m_fluid_dd_1d
    integer               :: FL_ie_mob, FL_ie_dif, FL_ie_src, FL_ie_att, FL_ie_loss, FL_num_en_coef
    logical               :: FL_use_en, FL_use_en_mob, FL_use_en_dif, FL_use_en_src, FL_use_detach
 
-   integer               :: FL_grid_size
    real(dp), allocatable :: FL_vars(:,:)
-   real(dp)              :: FL_delta_x
    real(dp)              :: FL_small_dens
 
-   type(LT_mcol_t) :: FL_lkp_fld, FL_lkp_en
+   type(LT_table_t) :: FL_lkp_fld, FL_lkp_en
    procedure(TS_dd_1d_type), pointer :: FL_transport_scheme
 
    public :: FL_init_cfg
@@ -31,35 +30,35 @@ module m_fluid_dd_1d
 
 contains
 
-   subroutine FL_init_cfg(sim_type, input_file, gas_name)
+   subroutine FL_init_cfg(cfg, sim_type, input_file, gas_name)
       use m_transport_data
       use m_init_cond_1d
       use m_config
       use m_model_choice
       use m_efield_1d
 
+      type(CFG_t), intent(in)      :: cfg
       integer, intent(in)          :: sim_type
       character(len=*), intent(in) :: input_file, gas_name
       integer, parameter           :: nameLen = 80
       integer                      :: n, table_size
       real(dp)                     :: max_energy, max_efield, xx
       real(dp), allocatable        :: x_data(:), y_data(:)
+      character(len=100)           :: data_name
 
       FL_transport_scheme => TS_dd_1d_up_fl
 
-      table_size    = CFG_get_int("fluid_lkptbl_size")
-      max_energy    = CFG_get_real("fluid_lkptbl_max_energy")
-      max_efield    = CFG_get_real("fluid_lkptbl_max_efield")
-      FL_grid_size  = CFG_get_int("grid_num_points")
-      FL_delta_x    = CFG_get_real("grid_delta_x")
-      FL_small_dens = CFG_get_real("fluid_small_density")
+      call CFG_get_size(cfg, "fluid_lkptbl_size", table_size)
+      call CFG_get(cfg, "fluid_lkptbl_max_energy", max_energy)
+      call CFG_get(cfg, "fluid_lkptbl_max_efield", max_efield)
+      call CFG_get(cfg, "fluid_small_density", FL_small_dens)
 
       if (sim_type == MODEL_fluid_ee) then
          FL_use_en     = .true.
-         FL_use_en_mob = CFG_get_logic("fluid_use_en_mob")
-         FL_use_en_dif = CFG_get_logic("fluid_use_en_dif")
-         FL_use_en_src = CFG_get_logic("fluid_use_en_src")
-         FL_use_detach = CFG_get_logic("fluid_use_detach")
+         call CFG_get(cfg, "fluid_use_en_mob", FL_use_en_mob)
+         call CFG_get(cfg, "fluid_use_en_dif", FL_use_en_dif)
+         call CFG_get(cfg, "fluid_use_en_src", FL_use_en_src)
+         call CFG_get(cfg, "fluid_use_detach", FL_use_detach)
       else
          FL_use_en     = .false.
          FL_use_en_mob = .false.
@@ -79,72 +78,82 @@ contains
          FL_iv_en = FL_num_vars
       end if
 
-      allocate(FL_vars(FL_grid_size, FL_num_vars))
+      allocate(FL_vars(PD_grid_size, FL_num_vars))
 
       ! Create a lookup table for the model coefficients
-      FL_lkp_fld = LT_create_mcol(0.0_dp, max_efield, table_size, 0)
+      FL_lkp_fld = LT_create(0.0_dp, max_efield, table_size, 0)
       if (FL_use_en) then
-         FL_lkp_en = LT_create_mcol(0.0_dp, max_energy, table_size, 0)
-
+         FL_lkp_en = LT_create(0.0_dp, max_energy, table_size, 0)
+         call CFG_get(cfg, "fluid_en_loss", data_name)
          call TD_get_td_from_file(input_file, gas_name, &
-              trim(CFG_get_string("fluid_en_loss")), x_data, y_data)
+              trim(data_name), x_data, y_data)
          call LT_add_col(FL_lkp_en, x_data, y_data)
          FL_ie_loss = LT_get_num_cols(FL_lkp_en)
       end if
 
       if (FL_use_en_mob) then
+         call CFG_get(cfg, "fluid_en_mob", data_name)
          call TD_get_td_from_file(input_file, gas_name, &
-              trim(CFG_get_string("fluid_en_mob")), x_data, y_data)
+              trim(data_name), x_data, y_data)
          call LT_add_col(FL_lkp_en, x_data, y_data)
          FL_ie_mob = LT_get_num_cols(FL_lkp_en)
       else
+         call CFG_get(cfg, "fluid_fld_mob", data_name)
          call TD_get_td_from_file(input_file, gas_name, &
-              trim(CFG_get_string("fluid_fld_mob")), x_data, y_data)
+              trim(data_name), x_data, y_data)
          call LT_add_col(FL_lkp_fld, x_data, y_data)
          FL_if_mob = LT_get_num_cols(FL_lkp_fld)
       end if
 
       if (FL_use_en_dif) then
+         call CFG_get(cfg, "fluid_en_dif", data_name)
          call TD_get_td_from_file(input_file, gas_name, &
-              trim(CFG_get_string("fluid_en_dif")), x_data, y_data)
+              trim(data_name), x_data, y_data)
          call LT_add_col(FL_lkp_en, x_data, y_data)
          FL_ie_dif = LT_get_num_cols(FL_lkp_en)
       else
+         call CFG_get(cfg, "fluid_fld_dif", data_name)
          call TD_get_td_from_file(input_file, gas_name, &
-              trim(CFG_get_string("fluid_fld_dif")), x_data, y_data)
+              trim(data_name), x_data, y_data)
          call LT_add_col(FL_lkp_fld, x_data, y_data)
          FL_if_dif = LT_get_num_cols(FL_lkp_fld)
       end if
 
       if (FL_use_en_src) then
+         call CFG_get(cfg, "fluid_en_alpha", data_name)
          call TD_get_td_from_file(input_file, gas_name, &
-              trim(CFG_get_string("fluid_en_alpha")), x_data, y_data)
+              trim(data_name), x_data, y_data)
          call LT_add_col(FL_lkp_en, x_data, y_data)
          FL_ie_src = LT_get_num_cols(FL_lkp_en)
+         call CFG_get(cfg, "fluid_en_eta", data_name)
          call TD_get_td_from_file(input_file, gas_name, &
-              trim(CFG_get_string("fluid_en_eta")), x_data, y_data)
+              trim(data_name), x_data, y_data)
          call LT_add_col(FL_lkp_en, x_data, y_data)
          FL_ie_att = LT_get_num_cols(FL_lkp_en)
       else
+         call CFG_get(cfg, "fluid_fld_alpha", data_name)
          call TD_get_td_from_file(input_file, gas_name, &
-              trim(CFG_get_string("fluid_fld_alpha")), x_data, y_data)
+              trim(data_name), x_data, y_data)
          call LT_add_col(FL_lkp_fld, x_data, y_data)
          FL_if_src = LT_get_num_cols(FL_lkp_fld)
+         call CFG_get(cfg, "fluid_fld_eta", data_name)
          call TD_get_td_from_file(input_file, gas_name, &
-              trim(CFG_get_string("fluid_fld_eta")), x_data, y_data)
+              trim(data_name), x_data, y_data)
          call LT_add_col(FL_lkp_fld, x_data, y_data)
          FL_if_att = LT_get_num_cols(FL_lkp_fld)
       end if
 
       if (FL_use_detach) then
+         call CFG_get(cfg, "fluid_fld_det", data_name)
          call TD_get_td_from_file(input_file, gas_name, &
-              trim(CFG_get_string("fluid_fld_det")), x_data, y_data)
+              trim(data_name), x_data, y_data)
          call LT_add_col(FL_lkp_fld, x_data, y_data)
          FL_if_det= LT_get_num_cols(FL_lkp_fld)
       end if
 
+      call CFG_get(cfg, "fluid_fld_en", data_name)
       call TD_get_td_from_file(input_file, gas_name, &
-           trim(CFG_get_string("fluid_fld_en")), x_data, y_data)
+           trim(data_name), x_data, y_data)
       call LT_add_col(FL_lkp_fld, x_data, y_data)
       FL_if_en = LT_get_num_cols(FL_lkp_fld)
 
@@ -152,14 +161,14 @@ contains
       FL_num_en_coef  = LT_get_num_cols(FL_lkp_en)
 
       ! Initialization of electron and ion density
-      do n = 1, FL_grid_size
-         xx = (n-1) * FL_delta_x
+      do n = 1, PD_grid_size
+         xx = (n-1) * PD_dx
          call INIT_get_elec_dens(xx, FL_vars(n, FL_iv_elec))
          call INIT_get_ion_dens(xx, FL_vars(n, FL_iv_ion))
          call INIT_get_nion_dens(xx, FL_vars(n, FL_iv_nion))
          if (FL_use_en) then
             FL_vars(n, FL_iv_en) = FL_vars(n, FL_iv_elec) * &
-                 LT_get_1col(FL_lkp_fld, FL_if_en, EF_get_at_pos((n-1)*FL_delta_x))
+                 LT_get_col(FL_lkp_fld, FL_if_en, EF_get_at_pos((n-1)*PD_dx))
          end if
       end do
 
@@ -167,7 +176,7 @@ contains
 
    real(dp) function FL_max_edens_at_boundary()
       FL_max_edens_at_boundary = &
-           max(FL_vars(1, FL_iv_elec), FL_vars(FL_grid_size, FL_iv_elec))
+           max(FL_vars(1, FL_iv_elec), FL_vars(PD_grid_size, FL_iv_elec))
    end function FL_max_edens_at_boundary
 
    subroutine FL_time_derivs(vars, time, time_derivs)
@@ -185,43 +194,43 @@ contains
       type(LT_loc_t) :: fld_locs(size(vars,1)-1), en_locs(size(vars,1)-1)
 
       n_cc = size(vars, 1)
-      inv_delta_x = 1.0_dp / FL_delta_x
+      inv_delta_x = 1.0_dp / PD_dx
 
       ! Get electric field
       source = (vars(:, FL_iv_ion) - vars(:, FL_iv_elec) - vars(:, FL_iv_nion)) * UC_elem_charge
       call EF_compute_and_get_st(source, fld)
 
       ! Get locations in the lookup table
-      fld_locs = LT_get_loc_mcol(FL_lkp_fld, abs(fld))
+      fld_locs = LT_get_loc(FL_lkp_fld, abs(fld))
       if (FL_use_en) then
          ! There is a regularization: at density zero, we use the energy corresponding to the efield
-         fld_en = LT_get_1col_at_loc(FL_lkp_fld, FL_if_en, fld_locs)
+         fld_en = LT_get_col_at_loc(FL_lkp_fld, FL_if_en, fld_locs)
          mean_en = (vars(1:n_cc-1, FL_iv_en) + vars(2:n_cc, FL_iv_en) + 2 * FL_small_dens * fld_en) &
               / (vars(1:n_cc-1, FL_iv_elec) + vars(2:n_cc, FL_iv_elec) + 2 * FL_small_dens)
-         en_locs = LT_get_loc_mcol(FL_lkp_en, mean_en)
-         en_loss = LT_get_1col_at_loc(FL_lkp_en, FL_ie_loss, en_locs)
+         en_locs = LT_get_loc(FL_lkp_en, mean_en)
+         en_loss = LT_get_col_at_loc(FL_lkp_en, FL_ie_loss, en_locs)
       end if
 
       if (FL_use_en_mob) then
-         mob_c = LT_get_1col_at_loc(FL_lkp_en, FL_ie_mob, en_locs)
+         mob_c = LT_get_col_at_loc(FL_lkp_en, FL_ie_mob, en_locs)
       else
-         mob_c = LT_get_1col_at_loc(FL_lkp_fld, FL_if_mob, fld_locs)
+         mob_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_mob, fld_locs)
       end if
 
       if (FL_use_en_dif) then
-         dif_c = LT_get_1col_at_loc(FL_lkp_en, FL_ie_dif, en_locs)
+         dif_c = LT_get_col_at_loc(FL_lkp_en, FL_ie_dif, en_locs)
       else
-         dif_c = LT_get_1col_at_loc(FL_lkp_fld, FL_if_dif, fld_locs)
+         dif_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_dif, fld_locs)
       end if
 
       if (FL_use_en_src) then
-         src_c = LT_get_1col_at_loc(FL_lkp_en, FL_ie_src, en_locs)
-         att_c = LT_get_1col_at_loc(FL_lkp_en, FL_ie_att, en_locs)
+         src_c = LT_get_col_at_loc(FL_lkp_en, FL_ie_src, en_locs)
+         att_c = LT_get_col_at_loc(FL_lkp_en, FL_ie_att, en_locs)
       else
-         src_c = LT_get_1col_at_loc(FL_lkp_fld, FL_if_src, fld_locs)
-         att_c = LT_get_1col_at_loc(FL_lkp_fld, FL_if_att, fld_locs)
+         src_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_src, fld_locs)
+         att_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_att, fld_locs)
       end if
-      if (FL_use_detach) det_c = LT_get_1col_at_loc(FL_lkp_fld, FL_if_det, fld_locs)
+      if (FL_use_detach) det_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_det, fld_locs)
 
       ! ~~~ Electron transport ~~~
       call FL_transport_scheme(vars(:, FL_iv_elec), -mob_c * fld, dif_c * inv_delta_x, flux)
@@ -299,7 +308,7 @@ contains
       real(dp), intent(out)   :: new_dt
       real(dp), intent(inout) :: time
       integer                 :: n
-      real(dp)                :: max_errs(FL_grid_size, FL_num_vars)
+      real(dp)                :: max_errs(PD_grid_size, FL_num_vars)
 
       do n = 1, FL_num_vars
          max_errs(:, n) = abs_err * max(epsilon(1.0_dp), maxval(abs(FL_vars(:, n))))
@@ -316,16 +325,16 @@ contains
       character(len=*), intent(out), allocatable :: data_names(:)
       integer, intent(out)                              :: n_pos, n_sca
       integer                                           :: n, ix
-      real(dp)                                          :: temp_data(FL_grid_size), fld_en(FL_grid_size)
+      real(dp)                                          :: temp_data(PD_grid_size), fld_en(PD_grid_size)
 
       n_pos = 7
       n_sca = 2
-      allocate(pos_data(FL_grid_size, n_pos))
+      allocate(pos_data(PD_grid_size, n_pos))
       allocate(sca_data(n_sca))
       allocate(data_names(n_pos+n_sca))
 
-      do n = 1, FL_grid_size
-         temp_data(n) = (n-1) * FL_delta_x
+      do n = 1, PD_grid_size
+         temp_data(n) = (n-1) * PD_dx
       end do
 
       data_names(n_sca+1) = "position (m)"
@@ -333,7 +342,7 @@ contains
 
       call EF_compute_and_get((FL_vars(:, FL_iv_ion) - FL_vars(:, FL_iv_elec) - FL_vars(:, FL_iv_nion)) &
            * UC_elem_charge, temp_data)
-      fld_en = LT_get_1col(FL_lkp_fld, FL_if_en, abs(temp_data))
+      fld_en = LT_get_col(FL_lkp_fld, FL_if_en, abs(temp_data))
 
       data_names(n_sca+2) = "electric field (V/m)"
       pos_data(:,2) = temp_data
@@ -350,14 +359,14 @@ contains
 
       ix = -1
       if (pos_data(1,2) > 0) then ! Check sign of electric field
-         do n = 2, FL_grid_size
+         do n = 2, PD_grid_size
             if (pos_data(n, 3) > head_density) then
                ix = n
                exit
             end if
          end do
       else
-         do n = FL_grid_size, 2, -1
+         do n = PD_grid_size, 2, -1
             if (pos_data(n-1, 3) > head_density) then
                ix = n
                exit
@@ -370,7 +379,7 @@ contains
       else
          ! Interpolate between points ix-1 and ix
          sca_data(2) = (head_density - pos_data(ix-1, 3)) / (pos_data(ix, 3) - pos_data(ix-1, 3))
-         sca_data(2) = (ix - 2 + sca_data(2)) * FL_delta_x
+         sca_data(2) = (ix - 2 + sca_data(2)) * PD_dx
       end if
 
       data_names(n_sca+4) = "ion density (1/m3)"
@@ -407,11 +416,11 @@ contains
       n_fld_coeffs = LT_get_num_cols(FL_lkp_fld) + 1
 
       n_coeffs = n_fld_coeffs + n_en_coeffs
-      n_rows = LT_get_num_rows_mcol(FL_lkp_fld)
+      n_rows = LT_get_num_rows(FL_lkp_fld)
       allocate(coeff_data(n_coeffs, n_rows))
       allocate(coeff_names(n_coeffs))
 
-      call LT_get_data_mcol(FL_lkp_fld, coeff_data(1, :), coeff_data(2:n_fld_coeffs, :))
+      call LT_get_data(FL_lkp_fld, coeff_data(1, :), coeff_data(2:n_fld_coeffs, :))
       coeff_names(1) = "efield (V/m)"
       coeff_names(1+FL_if_en) = "fld_en (eV)"
       if (FL_use_detach) coeff_names(1+FL_if_det) = "fld_det (1/s)"
@@ -424,7 +433,7 @@ contains
 
       if (FL_use_en) then
          ix = n_fld_coeffs + 1
-         call LT_get_data_mcol(FL_lkp_en, coeff_data(ix, :), coeff_data(ix+1:, :))
+         call LT_get_data(FL_lkp_en, coeff_data(ix, :), coeff_data(ix+1:, :))
          coeff_names(ix) = "energy (eV/s)"
          coeff_names(ix+FL_ie_loss) = "en_loss (eV/s)"
          if (FL_use_en_mob) coeff_names(ix+FL_ie_mob) = "en_mob (m2/Vs)"

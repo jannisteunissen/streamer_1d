@@ -25,13 +25,15 @@ module m_efield_1d
 
 contains
 
-  subroutine EF_initialize()
+  subroutine EF_initialize(cfg)
     use m_config
-    EF_grid_size      = CFG_get_int("grid_num_points")
-    EF_delta_x     = CFG_get_real("grid_delta_x")
+    type(CFG_t), intent(in) :: cfg
+    
+    call CFG_get(cfg, "grid_num_points", EF_grid_size)
+    call CFG_get(cfg, "grid_delta_x", EF_delta_x)
     EF_inv_delta_x = 1.0_dp / EF_delta_x
-    EF_applied_field = CFG_get_real("sim_applied_efield")
-    EF_is_constant = CFG_get_logic("sim_constant_efield")
+    call CFG_get(cfg, "sim_applied_efield", EF_applied_field)
+    call CFG_get(cfg, "sim_constant_efield", EF_is_constant)
 
     ! The electric field is defined at cell faces, so it includes one extra point.
     ! e.g., if the charge density is defined at 0, dx, 2*dx, then the electric field is

@@ -3,16 +3,16 @@ module m_init_cond_1d
    implicit none
    private
 
-   integer, parameter :: dp = kind(0.0d0)
+   integer, parameter :: dp                 = kind(0.0d0)
    integer, parameter :: INIT_gaussian_type = 1, &
-        INIT_block_type = 2
+        INIT_block_type                     = 2
    integer            :: INIT_type          = -1
    real(dp)           :: INIT_location
    real(dp)           :: INIT_width
    real(dp)           :: INIT_dens
    real(dp)           :: INIT_energy
    real(dp)           :: INIT_small_dens
-   logical :: INIT_use_nion
+   logical            :: INIT_use_nion
 
    public :: INIT_init
    public :: INIT_get_elec_dens
@@ -22,13 +22,15 @@ module m_init_cond_1d
 
 contains
 
-   subroutine INIT_init()
+   subroutine INIT_init(cfg)
       use m_config
-      character(len=20) :: init_name
-      real(dp)          :: domain_length
+      use m_phys_domain
+
+      type(CFG_t), intent(in) :: cfg
+      character(len=20)       :: init_name
 
       ! Get the type of initial condition
-      call CFG_get("init_cond_name", init_name)
+      call CFG_get(cfg, "init_cond_name", init_name)
 
       select case (init_name)
       case ("gaussian")
@@ -40,13 +42,13 @@ contains
          stop
       end select
 
-      domain_length = CFG_get_real("grid_delta_x") * (CFG_get_int("grid_num_points") - 1)
-      INIT_width = CFG_get_real("init_width")
-      INIT_location = CFG_get_real("init_rel_pos") * domain_length
-      INIT_dens = CFG_get_real("init_dens")
-      INIT_energy = CFG_get_real("init_elec_energy")
-      INIT_use_nion = CFG_get_logic("init_use_neg_ion")
-      INIT_small_dens = 0.0_dp !CFG_get_real("init_cutoff_density")
+      call CFG_get(cfg, "init_width", INIT_width)
+      call CFG_get(cfg, "init_rel_pos", INIT_location)
+      INIT_location = INIT_location * PD_length
+      call CFG_get(cfg, "init_dens", INIT_dens)
+      call CFG_get(cfg, "init_elec_energy", INIT_energy)
+      call CFG_get(cfg, "init_use_neg_ion", INIT_use_nion)
+      call CFG_get(cfg, "init_cutoff_density", INIT_small_dens)
    end subroutine INIT_init
 
    real(dp) function get_dens(xx)

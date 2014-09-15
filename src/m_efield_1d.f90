@@ -3,13 +3,12 @@
 ! E_i = E_0 - Sum of charge before current point / epsilon0,
 
 module m_efield_1d
-
+  use m_phys_domain
+  
   implicit none
   private
 
   integer, parameter :: dp = kind(0.0d0)
-  integer               :: EF_grid_size
-  real(dp)              :: EF_delta_x, EF_inv_delta_x
   real(dp)              :: EF_applied_field
   real(dp), allocatable :: EF_values(:)
   logical               :: EF_is_constant
@@ -28,10 +27,7 @@ contains
   subroutine EF_initialize(cfg)
     use m_config
     type(CFG_t), intent(in) :: cfg
-    
-    call CFG_get(cfg, "grid_num_points", EF_grid_size)
-    call CFG_get(cfg, "grid_delta_x", EF_delta_x)
-    EF_inv_delta_x = 1.0_dp / EF_delta_x
+
     call CFG_get(cfg, "sim_applied_efield", EF_applied_field)
     call CFG_get(cfg, "sim_constant_efield", EF_is_constant)
 
@@ -39,9 +35,8 @@ contains
     ! e.g., if the charge density is defined at 0, dx, 2*dx, then the electric field is
     ! defined at -0.5*dx, 0.5*dx, 1.5*dx, 2.5*dx, with the first value equal to the applied field.
     ! These extra values are mostly useful as a buffer for EF_get_at_pos
-    allocate(EF_values(EF_grid_size+1))
+    allocate(EF_values(PD_grid_size+1))
     EF_values = EF_applied_field
-
   end subroutine EF_initialize
 
   subroutine EF_compute(net_charge)
@@ -50,14 +45,14 @@ contains
     real(dp)             :: conv_fac
     integer              :: iz
 
-    if (size(net_charge) /= EF_grid_size) then
+    if (size(net_charge) /= PD_grid_size) then
        print *, "EF_compute: argument has wrong size"
        stop
     end if
 
-    conv_fac = EF_delta_x / UC_eps0
+    conv_fac = PD_dx / UC_eps0
     if (.not. EF_is_constant) then
-       do iz = 2, EF_grid_size+1
+       do iz = 2, PD_grid_size+1
           EF_values(iz) = EF_values(iz-1) + net_charge(iz-1) * conv_fac
        end do
     end if
@@ -84,12 +79,12 @@ contains
     real(dp) :: Efield_pos, temp
     integer :: lowIx
 
-    ! EF_values(1) is defined at -0.5 * EF_delta_x
-    lowIx = nint(pos * EF_inv_delta_x) + 1
-    lowIx = min(EF_grid_size, max(1, lowIx))
+    ! EF_values(1) is defined at -0.5 * PD_dx
+    lowIx = nint(pos * PD_inv_dx) + 1
+    lowIx = min(PD_grid_size, max(1, lowIx))
 
-    Efield_pos = (lowIx - 1.5_dp) * EF_delta_x
-    temp = (pos - Efield_pos) * EF_inv_delta_x
+    Efield_pos = (lowIx - 1.5_dp) * PD_dx
+    temp = (pos - Efield_pos) * PD_inv_dx
 
     ! Do linear interpolation between lowIx and lowIx + 1 in the Efield array, given the position
     EF_get_at_pos = (1.0_dp - temp) * EF_values(lowIx) + temp * EF_values(lowIx+1)
@@ -99,7 +94,7 @@ contains
   !> Get a copy of the electric field at cell centers
   subroutine EF_get_values(out_efield)
     real(dp), intent(out) :: out_efield(:)
-    out_efield(:) = 0.5_dp * (EF_values(1:EF_grid_size) + EF_values(2:EF_grid_size+1))
+    out_efield(:) = 0.5_dp * (EF_values(1:PD_grid_size) + EF_values(2:PD_grid_size+1))
   end subroutine EF_get_values
 
   real(dp) function EF_get_min_field()
@@ -109,7 +104,7 @@ contains
   !> Get a copy of the electric field at cell faces (interior ones)
   subroutine EF_get_values_st(out_efield)
     real(dp), intent(out) :: out_efield(:)
-    out_efield(:) = EF_values(2:EF_grid_size) ! Return only the interior points
+    out_efield(:) = EF_values(2:PD_grid_size) ! Return only the interior points
   end subroutine EF_get_values_st
 
 end module m_efield_1d

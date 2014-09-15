@@ -12,9 +12,12 @@ module m_fluid_dd_1d
    integer               :: FL_num_vars
    integer               :: FL_iv_elec, FL_iv_ion, FL_iv_en, FL_iv_nion
 
-   integer               :: FL_if_mob, FL_if_dif, FL_if_src, FL_if_en, FL_if_att, FL_if_det, FL_num_fld_coef
-   integer               :: FL_ie_mob, FL_ie_dif, FL_ie_src, FL_ie_att, FL_ie_loss, FL_num_en_coef
-   logical               :: FL_use_en, FL_use_en_mob, FL_use_en_dif, FL_use_en_src, FL_use_detach
+   integer               :: FL_if_mob, FL_if_dif, FL_if_src, FL_if_en, &
+        FL_if_att, FL_if_det, FL_num_fld_coef
+   integer               :: FL_ie_mob, FL_ie_dif, FL_ie_src, FL_ie_att, &
+        FL_ie_loss, FL_num_en_coef
+   logical               :: FL_use_en, FL_use_en_mob, FL_use_en_dif, &
+        FL_use_en_src, FL_use_detach
 
    real(dp), allocatable :: FL_vars(:,:)
    real(dp)              :: FL_small_dens
@@ -30,7 +33,7 @@ module m_fluid_dd_1d
 
 contains
 
-   subroutine FL_init_cfg(cfg, sim_type, input_file, gas_name)
+   subroutine FL_init_cfg(cfg)
       use m_transport_data
       use m_init_cond_1d
       use m_config
@@ -38,22 +41,24 @@ contains
       use m_efield_1d
 
       type(CFG_t), intent(in)      :: cfg
-      integer, intent(in)          :: sim_type
-      character(len=*), intent(in) :: input_file, gas_name
-      integer, parameter           :: nameLen = 80
+      integer, parameter           :: name_len = 100
+      character(len=name_len) :: input_file, gas_name
       integer                      :: n, table_size
       real(dp)                     :: max_energy, max_efield, xx
       real(dp), allocatable        :: x_data(:), y_data(:)
       character(len=100)           :: data_name
 
+      input_file = "input/" // CFG_fget_string(cfg, "fluid_input_file")
+      gas_name = CFG_fget_string(cfg, "gas_mixture_name")
+
       FL_transport_scheme => TS_dd_1d_up_fl
 
-      call CFG_get_size(cfg, "fluid_lkptbl_size", table_size)
+      call CFG_get(cfg, "fluid_lkptbl_size", table_size)
       call CFG_get(cfg, "fluid_lkptbl_max_energy", max_energy)
       call CFG_get(cfg, "fluid_lkptbl_max_efield", max_efield)
       call CFG_get(cfg, "fluid_small_density", FL_small_dens)
 
-      if (sim_type == MODEL_fluid_ee) then
+      if (MODEL_type == MODEL_fluid_ee) then
          FL_use_en     = .true.
          call CFG_get(cfg, "fluid_use_en_mob", FL_use_en_mob)
          call CFG_get(cfg, "fluid_use_en_dif", FL_use_en_dif)

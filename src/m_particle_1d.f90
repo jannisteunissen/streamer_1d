@@ -22,6 +22,9 @@ module m_particle_1d
   public :: PM_get_output
   public :: PM_get_eedf
   public :: PM_max_edens_at_boundary
+  public :: PM_get_num_sim_part
+  public :: PM_get_num_real_part
+  public :: PM_get_coeffs
 
 contains
 
@@ -47,10 +50,10 @@ contains
        sum_elec_dens = sum_elec_dens + elec_dens
     end do
 
-    if (size(cross_secs) < 1) then
-       print *, "No cross sections given to particle module!"
-       stop
-    end if
+    if (size(cross_secs) < 1) &
+         stop "No cross sections given to particle module!"
+    if (sum_elec_dens < epsilon(1.0_dp)) &
+         stop "Initial electron density seems to be zero!"
 
     PM_grid_volume     = n_part_init / sum_elec_dens
     PM_transverse_area = PM_grid_volume / PD_dx
@@ -93,7 +96,7 @@ contains
        pm_vars(n, PM_iv_ion) = num_part / PM_grid_volume
     end do
 
-    call set_elec_density(pc)
+    call set_elec_density()
     call PM_update_efield()
     call pc%correct_new_accel(0.0_dp, accel_func)
 
@@ -104,14 +107,12 @@ contains
          max(PM_vars(1, PM_iv_elec), PM_vars(PD_grid_size, PM_iv_elec))
   end function PM_max_edens_at_boundary
 
-  subroutine set_elec_density(pc)
-    type(PC_t), intent(in) :: pc
+  subroutine set_elec_density()
     PM_vars(:, PM_iv_elec) = 0.0_dp
     call pc%loop_ipart(add_elec_to_dens)
   end subroutine set_elec_density
 
-  subroutine set_elec_en_density(pc)
-    type(PC_t), intent(in) :: pc
+  subroutine set_elec_en_density()
     PM_vars(:, PM_iv_en) = 0.0_dp
     call pc%loop_ipart(add_elec_en_to_dens)
   end subroutine set_elec_en_density
@@ -165,6 +166,14 @@ contains
     call add_to_dens_cic(energy, my_part%x(3), PM_vars(:, PM_iv_en))
   end subroutine add_elec_en_to_dens
 
+  integer function PM_get_num_sim_part()
+    PM_get_num_sim_part = pc%get_num_sim_part()
+  end function PM_get_num_sim_part
+
+  real(dp) function PM_get_num_real_part()
+    PM_get_num_real_part = pc%get_num_real_part()
+  end function PM_get_num_real_part
+
   subroutine coll_callback(pc, my_part, col_ix, col_type)
     use m_cross_sec
     class(PC_t), intent(inout)  :: pc
@@ -197,30 +206,29 @@ contains
     accel(3) = accel_fac * EF_get_at_pos(my_part%x(3))
   end function accel_func
 
-  subroutine PM_advance(pc, dt, do_apm)
-    type(PC_t), intent(inout) :: pc
+  subroutine PM_advance(dt, do_apm)
     real(dp), intent(in)   :: dt
     logical, intent(in)    :: do_apm
 
     call pc%advance(dt)
-    call set_elec_density(pc)
+    call set_elec_density()
     call PM_update_efield()
     call pc%correct_new_accel(dt, accel_func)
-    if (do_apm) call PM_adapt_weights(pc)
+    if (do_apm) call PM_adapt_weights()
   end subroutine PM_advance
 
-  subroutine PM_adapt_weights(pc)
-    type(PC_t), intent(inout) :: pc
+  subroutine PM_adapt_weights()
     real(dp) :: v_fac
     v_fac = PM_vel_rel_weight * PD_dx / PM_part_per_cell
     
     call pc%merge_and_split((/.false., .false., .true./), v_fac, .false., &
          get_desired_weight, PC_merge_part_rxv, PC_split_part)
-    call set_elec_density(pc)
+    call set_elec_density()
     call PM_update_efield()
     call pc%set_accel(accel_func)
 
-    write(*,'(A, E12.4, A, I0)') "After merging real/sim part: ", pc%get_num_real_part(), " / ", pc%get_num_sim_part()
+    write(*,'(A, E12.4, A, I0)') " After merging real/sim part: ", &
+         pc%get_num_real_part(), " / ", pc%get_num_sim_part()
   end subroutine PM_adapt_weights
 
   real(dp) function get_desired_weight(my_part)
@@ -231,16 +239,24 @@ contains
     get_desired_weight = max(1.0_dp, get_desired_weight)
   end function get_desired_weight
 
-  subroutine PM_get_output(pc, pos_data, sca_data, data_names, n_pos, n_sca, time, head_density)
+  subroutine PM_get_coeffs(coeff_data, coeff_names, n_coeffs)
+    integer, intent(out)                          :: n_coeffs
+    real(dp), allocatable, intent(inout)          :: coeff_data(:,:)
+    character(len=20), allocatable, intent(inout) :: coeff_names(:)
+
+    call pc%get_coeffs(coeff_data, coeff_names, n_coeffs)
+  end subroutine PM_get_coeffs
+
+  subroutine PM_get_output(pos_data, sca_data, data_names, &
+       n_pos, n_sca, time, head_density)
     use m_efield_1d
     use m_units_constants
-    type(PC_t), intent(in) :: pc
-    real(dp), intent(out), allocatable                :: pos_data(:,:), sca_data(:)
-    real(dp), intent(in) :: time, head_density
+    real(dp), intent(out), allocatable         :: pos_data(:,:), sca_data(:)
+    real(dp), intent(in)                       :: time, head_density
     character(len=*), intent(out), allocatable :: data_names(:)
-    integer, intent(out)                              :: n_pos, n_sca
-    integer                                           :: n, ix
-    real(dp)                                          :: temp_data(PD_grid_size)
+    integer, intent(out)                       :: n_pos, n_sca
+    integer                                    :: n, ix
+    real(dp)                                   :: temp_data(PD_grid_size)
 
     n_pos = 6
     n_sca = 2
@@ -255,11 +271,12 @@ contains
     data_names(n_sca+1) = "position (m)"
     pos_data(:,1) = temp_data
 
-    call EF_compute_and_get((PM_vars(:, PM_iv_ion) - PM_vars(:, PM_iv_elec)) * UC_elem_charge, temp_data)
+    call EF_compute_and_get((PM_vars(:, PM_iv_ion) - PM_vars(:, PM_iv_elec)) * &
+         UC_elem_charge, temp_data)
     data_names(n_sca+2) = "electric field (V/m)"
     pos_data(:,2) = temp_data
 
-    call set_elec_density(pc)
+    call set_elec_density()
     data_names(n_sca+3) = "electron density (1/m3)"
     pos_data(:,3) = PM_vars(:, PM_iv_elec)
 
@@ -291,14 +308,15 @@ contains
        sca_data(2) = 0
     else
        ! Interpolate between points ix-1 and ix
-       sca_data(2) = (head_density - pos_data(ix-1, 3)) / (pos_data(ix, 3) - pos_data(ix-1, 3))
+       sca_data(2) = (head_density - pos_data(ix-1, 3)) / &
+            (pos_data(ix, 3) - pos_data(ix-1, 3))
        sca_data(2) = (ix - 2 + sca_data(2)) * PD_dx
     end if
 
     data_names(n_sca+4) = "ion density (1/m3)"
     pos_data(:,4) = PM_vars(:, PM_iv_ion)
 
-    call set_elec_en_density(pc)
+    call set_elec_en_density()
     data_names(n_sca+5) = "energy density (eV/m3)"
     pos_data(:,5) = PM_vars(:, PM_iv_en) / UC_elec_volt
 
@@ -310,9 +328,8 @@ contains
     end where
   end subroutine PM_get_output
 
-  subroutine PM_get_eedf(pc, eedf, energy_range, field_range, n_bins)
+  subroutine PM_get_eedf(eedf, energy_range, field_range, n_bins)
     use m_units_constants
-    type(PC_t), intent(in) :: pc
     real(dp), intent(inout), allocatable :: eedf(:,:)
     real(dp), intent(in) :: energy_range(2), field_range(2)
     integer, intent(in) :: n_bins
@@ -321,14 +338,16 @@ contains
     real(dp) :: accel_range(2)
     allocate(eedf(2, n_bins))
     do ix = 1, n_bins
-       eedf(1, ix) = energy_range(1) + (ix-0.5_dp) * (energy_range(2) - energy_range(1)) / n_bins
+       eedf(1, ix) = energy_range(1) + (ix-0.5_dp) * &
+            (energy_range(2) - energy_range(1)) / n_bins
     end do
 
     ! Convert to range of velocity**2
     eedf(1,:) = eedf(1,:) * UC_elec_volt / (0.5_dp * pc%get_mass())
     accel_range = field_range * UC_elem_charge / UC_elec_mass
 
-    call pc%histogram(get_vel_squared, select_part_by_accel, accel_range, eedf(1,:), eedf(2,:))
+    call pc%histogram(get_vel_squared, select_part_by_accel, &
+         accel_range, eedf(1,:), eedf(2,:))
 
     ! Convert to energy range
     eedf(1,:) = eedf(1,:) * 0.5_dp * pc%get_mass() / UC_elec_volt

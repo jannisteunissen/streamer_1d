@@ -66,6 +66,8 @@ contains
        get_dens = 0.0_dp
        stop "m_initial_cond is being used without proper initialization"
     end select
+
+    ! if (get_dens < INIT_small_dens) get_dens = 0
   end function get_dens
 
   subroutine INIT_get_elec_dens(xx, elec_dens)

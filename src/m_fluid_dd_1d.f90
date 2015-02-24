@@ -21,6 +21,7 @@ module m_fluid_dd_1d
 
    real(dp), allocatable :: FL_vars(:,:)
    real(dp)              :: FL_small_dens
+   real(dp)              :: FL_max_energy
 
    type(LT_table_t) :: FL_lkp_fld, FL_lkp_en
    procedure(TS_dd_1d_type), pointer :: FL_transport_scheme
@@ -40,13 +41,13 @@ contains
       use m_model_choice
       use m_efield_1d
 
-      type(CFG_t), intent(in)      :: cfg
-      integer, parameter           :: name_len = 100
+      type(CFG_t), intent(in) :: cfg
+      integer, parameter      :: name_len = 100
       character(len=name_len) :: input_file, gas_name
-      integer                      :: n, table_size
-      real(dp)                     :: max_energy, max_efield, xx
-      real(dp), allocatable        :: x_data(:), y_data(:)
-      character(len=100)           :: data_name
+      integer                 :: n, table_size
+      real(dp)                :: max_energy, max_efield, xx
+      real(dp), allocatable   :: x_data(:), y_data(:)
+      character(len=100)      :: data_name
 
       input_file = "input/" // CFG_fget_string(cfg, "fluid_input_file")
       gas_name = CFG_fget_string(cfg, "gas_mixture_name")
@@ -57,6 +58,7 @@ contains
       call CFG_get(cfg, "fluid_lkptbl_max_energy", max_energy)
       call CFG_get(cfg, "fluid_lkptbl_max_efield", max_efield)
       call CFG_get(cfg, "fluid_small_density", FL_small_dens)
+      FL_max_energy = max_energy
 
       if (MODEL_type == MODEL_fluid_ee) then
          FL_use_en     = .true.
@@ -307,19 +309,14 @@ contains
       dens_c(2:n_cc)   = dens_c(2:n_cc) + flux_f
    end subroutine add_grad_flux_1d
 
-   subroutine FL_advance(time, dt, max_dt, new_dt, abs_err)
+   subroutine FL_advance(time, dt)
       use m_time_steppers
-      real(dp), intent(in)    :: dt, max_dt, abs_err
-      real(dp), intent(out)   :: new_dt
+      real(dp), intent(in)    :: dt
       real(dp), intent(inout) :: time
-      integer                 :: n
-      real(dp)                :: max_errs(PD_grid_size, FL_num_vars)
 
-      do n = 1, FL_num_vars
-         max_errs(:, n) = abs_err * max(epsilon(1.0_dp), maxval(abs(FL_vars(:, n))))
-      end do
-
-      call STEP_rk4a_2d(FL_vars, max_errs, time, dt, max_dt, new_dt, FL_time_derivs)
+      call STEP_expl_trap_2d(FL_vars, time, dt, FL_time_derivs)
+      where (FL_vars(:, FL_iv_en) < 0) FL_vars(:, FL_iv_en) = 0
+      where (FL_vars(:, FL_iv_elec) < 0) FL_vars(:, FL_iv_elec) = 0
    end subroutine FL_advance
 
    subroutine FL_get_output(pos_data, sca_data, data_names, n_pos, n_sca, time, head_density)

@@ -35,7 +35,7 @@ program streamer_1d
 
   real(dp)             :: err_goal, small_dens
   real(dp)             :: sim_time, sim_end_time
-  real(dp)             :: dt, max_dt, new_dt
+  real(dp)             :: dt, max_dt
   real(dp)             :: output_dt, min_field
   real(dp)             :: time_now, time_start
   real(dp)             :: apm_increase
@@ -102,8 +102,7 @@ program streamer_1d
         sim_time = sim_time + dt
         stop_dens = (PM_max_edens_at_boundary() > small_dens)
      case (MODEL_fluid_lfa, MODEL_fluid_ee)
-        call FL_advance(sim_time, dt, max_dt, new_dt, err_goal)
-        dt = new_dt
+        call FL_advance(sim_time, dt)
         stop_dens = (FL_max_edens_at_boundary() > small_dens)
      end select
 
@@ -133,7 +132,8 @@ contains
     integer                           :: ix
     integer                           :: nn, n_gas_comp
     integer                           :: n_cs_files
-    character(len=s_len)              :: MODEL_type_name, cfg_name, tmp_name
+    character(len=s_len)              :: MODEL_type_name
+    character(len=s_len)              :: cfg_name, tmp_name, prev_name
     character(len=s_len), allocatable :: comp_names(:)
     character(len=s_len), allocatable :: cs_files(:)
     real(dp), allocatable             :: comp_fracs(:)
@@ -142,16 +142,21 @@ contains
     call create_sim_config(cfg)      ! Create default parameters for the simulation
     call CFG_sort(cfg)
 
-    sim_name = "sim"
+    sim_name = ""
+    prev_name = ""
     do ix = 1, command_argument_count()
        call get_command_argument(ix, cfg_name)
        call CFG_read_file(cfg, trim(cfg_name))
 
        call CFG_get(cfg, "sim_name", tmp_name)
-       if (tmp_name /= "") sim_name = trim(sim_name) // "_" // trim(tmp_name)
+       if (sim_name == "") then
+          sim_name = tmp_name
+       else if (tmp_name /= "" .and. tmp_name /= prev_name) then
+          sim_name = trim(sim_name) // "_" // trim(tmp_name)
+       end if
+       prev_name = tmp_name
     end do
 
-    call CFG_get(cfg, "sim_name", sim_name)
     call CFG_get(cfg, "sim_type", MODEL_type_name)
     call CFG_write(cfg, "output/" // trim(sim_name) // "_config.txt")
 
@@ -160,7 +165,7 @@ contains
 
     n_gas_comp = CFG_fget_size(cfg, "gas_comp_names")
     if (n_gas_comp /= CFG_fget_size(cfg, "gas_comp_fracs")) &
-       stop "streamer_1d: gas_comp_names/fracs have unequal size"
+         stop "streamer_1d: gas_comp_names/fracs have unequal size"
 
     allocate(comp_names(n_gas_comp))
     allocate(comp_fracs(n_gas_comp))
@@ -222,7 +227,7 @@ contains
          "The minimum required electric field")
     call CFG_add(cfg, "sim_rel_error_goal", 1.0D-4, &
          "Desired relative error in the solution between consecutive steps")
-    call CFG_add(cfg, "sim_name", "my_sim", &
+    call CFG_add(cfg, "sim_name", "sim", &
          "The name of the simulation")
 
     ! Grid parameters

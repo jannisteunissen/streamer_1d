@@ -1,7 +1,15 @@
 FC 	:= gfortran
-FFLAGS	:= -Wall -fcheck=all -ffpe-trap=invalid,zero,overflow -g -O3
+FFLAGS	:= -Wall -O2 -fopenmp
+
+ifeq ($(DEBUG), 1)
+	FFLAGS += -fcheck=array-temps,bounds,do,mem,pointer\
+	-g -ffpe-trap=invalid,zero,overflow
+endif
+
 OBJS	:= m_fluid_dd_1d.o m_model_choice.o m_output_1d.o m_init_cond_1d.o\
 	m_efield_1d.o m_particle_1d.o m_phys_domain.o
+
+
 
 INCDIRS	:= ../fosito ../particle_core ../fluid_core
 LIBDIRS := ../fosito ../particle_core ../fluid_core

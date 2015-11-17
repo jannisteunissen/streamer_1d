@@ -1,6 +1,0 @@
-sim_type = fluid_ee
-
-apm_part_per_cell = 400
-fluid_use_en_mob = f
-fluid_use_en_dif = f
-fluid_use_en_src = f

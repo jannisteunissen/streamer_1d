@@ -1,0 +1,181 @@
+ ##############################################
+ ###          Configuration file            ###
+ ##############################################
+
+ # The name of the simulation:
+ sim_name = ex1
+
+ # The type of simulation to run: part, fluid_lfa, fluid_ee:
+ sim_type = fluid_lfa
+
+ # The desired endtime in seconds of the simulation:
+ sim_end_time = 0.3000E-08
+
+ # The initial/fixed timestep in seconds:
+ sim_initial_dt = 0.3000E-12
+
+ # The maximal timestep in seconds:
+ sim_max_dt = 0.3000E-12
+
+ # The initial electric field:
+ sim_applied_efield = 0.1000E+08
+
+ # The length of a grid cell:
+ grid_dx = 0.4000E-05
+
+ # The number of grid cells:
+ grid_size = 1000
+
+ # The background ion and electron density in 1/m^3:
+ init_background_density = 0.0000E+00
+
+ # The type of initial condition:
+ init_cond_name = gaussian
+
+ # The relative position of the initial seed:
+ init_rel_pos = 0.5000E+00
+
+ # The number of initial ion pairs:
+ init_dens = 0.1000E+16
+
+ # The input file for the fluid models:
+ fluid_input_file = n2_transport_data.txt
+
+ # The names of the gases used in the simulation:
+ gas_comp_names = N2
+
+ # The files in which to find cross section data for each gas:
+ gas_cs_files = n2_cross_sections_siglo.txt
+
+ # The name of the gas mixture used:
+ gas_mixture_name = N2
+
+ # The partial pressure of the gases:
+ gas_comp_fracs = 0.1000E+01
+
+ # The gas pressure (bar):
+ gas_pressure = 0.1000E+01
+
+ # The gas temperature (Kelvin):
+ gas_temperature = 0.2930E+03
+
+ ##############################################
+ # More detailed options are listed below
+ ##############################################
+
+ # Adapt weight if #part increases by this factor:
+ apm_increase_factor = 0.1200E+01
+
+ # The desired number of particles per cell:
+ apm_part_per_cell = 0.1000E+03
+
+ # Adapt weight every apm_steps_between steps:
+ apm_steps_between = 100
+
+ # Relative weight of vel. in the k-d tree compared to position:
+ apm_vel_rel_weight = 0.1000E-05
+
+ # The name of the eff. ionization coeff.:
+ fluid_en_alpha = energy[eV]_vs_alpha[1/m]
+
+ # The name of the diffusion coefficient:
+ fluid_en_dif = energy[eV]_vs_dif[m2/s]
+
+ # The name of the eff. attachment coeff.:
+ fluid_en_eta = energy[eV]_vs_eta[1/m]
+
+ # The name of the energy vs efield list:
+ fluid_en_fld = energy[eV]_vs_efield[V/m]
+
+ # The name of the energy loss coeff.:
+ fluid_en_loss = energy[eV]_vs_loss[eV/s]
+
+ # The name of the mobility coefficient:
+ fluid_en_mob = energy[eV]_vs_mu[m2/Vs]
+
+ # The name of the eff. ionization coeff.:
+ fluid_fld_alpha = efield[V/m]_vs_alpha[1/m]
+
+ # The name of the detachment rate coeff.:
+ fluid_fld_det = efield[V/m]_vs_det[1/s]
+
+ # The name of the diffusion coefficient:
+ fluid_fld_dif = efield[V/m]_vs_dif[m2/s]
+
+ # The name of the energy(fld) coefficient:
+ fluid_fld_en = efield[V/m]_vs_energy[eV]
+
+ # The name of the eff. attachment coeff.:
+ fluid_fld_eta = efield[V/m]_vs_eta[1/m]
+
+ # The name of the energy loss coeff.:
+ fluid_fld_loss = efield[V/m]_vs_loss[eV/s]
+
+ # The name of the mobility coefficient:
+ fluid_fld_mob = efield[V/m]_vs_mu[m2/Vs]
+
+ # The maximum electric field in the fluid model coefficients:
+ fluid_lkptbl_max_efield = 0.3000E+08
+
+ # The maximum mean energy in eV in the fluid model coefficients:
+ fluid_lkptbl_max_energy = 0.1000E+03
+
+ # The transport data table size in the fluid model:
+ fluid_lkptbl_size = 1000
+
+ # Regularization density to compute a mean energy:
+ fluid_small_density = 0.1000E+01
+
+ # Whether to use electron detachment:
+ fluid_use_detach = F
+
+ # Whether to use energy dependent diffusion coefficient:
+ fluid_use_en_dif = F
+
+ # Whether to use energy dependent mobility:
+ fluid_use_en_mob = F
+
+ # Whether to use energy dependent source term:
+ fluid_use_en_src = F
+
+ # The initial energy of the electrons in eV:
+ init_elec_energy = 0.1000E+01
+
+ # The number of initial simulation particles:
+ init_num_part = 1000
+
+ # Whether to use neg. ions initially:
+ init_use_neg_ion = F
+
+ # The standard deviation used for Gaussian initial profiles:
+ init_width = 0.2500E-04
+
+ # The energy range over which to get the EEDF:
+ output_eedf_eV_range = 0.0000E+00 0.5000E+02
+
+ # The field range(s) over which to get the EEDF:
+ output_eedf_min_max_fields = 0.0000E+00 0.1000E+11 0.0000E+00 0.1000E+07
+
+ # The density level tracked as streamer head:
+ output_head_density = 0.2000E+19
+
+ # The timestep for writing output:
+ output_interval = 0.1000E-09
+
+ # The number of bins to use for histograms:
+ output_num_bins = 200
+
+ # The size of the lookup table for the collision rates:
+ part_lkptbl_size = 20000
+
+ # The maximum energy in eV for particles in the simulation:
+ part_max_ev = 0.1000E+04
+
+ # The maximum number of particles allowed per task:
+ part_max_num = 25000000
+
+ # Whether the electric field is kept constant:
+ sim_constant_efield = F
+
+ # The minimum required electric field:
+ sim_min_field = -.1000+100

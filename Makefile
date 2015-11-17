@@ -17,5 +17,5 @@ $(CLEANSRC):
 		$(MAKE) -C $(@:clean-%=%) clean
 
 # Dependecy information
-src:		fosito fluid_core particle_core
+src:			fosito fluid_core particle_core
 particle_core:	fosito

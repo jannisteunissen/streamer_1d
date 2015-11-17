@@ -1,6 +1,6 @@
-FC 	:= mpif90
+FC 		:= gfortran
 FFLAGS	:= -Wall -O2 -fopenmp
-OBJS	:= m_gas.o m_particle_core.o m_particle_par.o m_cross_sec.o kdtree2.o
+OBJS	:= m_gas.o m_particle_core.o m_cross_sec.o kdtree2.o
 
 INCDIRS	:= ../fosito
 
@@ -30,4 +30,3 @@ clean:
 
 # Dependency information
 m_particle_core.o:	m_cross_sec.o kdtree2.o
-m_particle_par.o:	m_particle_core.o

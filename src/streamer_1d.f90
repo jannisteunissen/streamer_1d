@@ -284,9 +284,9 @@ contains
     call CFG_add(cfg, "output_eedf_eV_range", (/0.0d0, 5.0d1/), &
          "The energy range over which to get the EEDF")
 
-    call CFG_add(cfg, "apm_part_per_cell", 1.0d2, &
+    call CFG_add(cfg, "apm_part_per_cell", 2.0d2, &
          "The desired number of particles per cell")
-    call CFG_add(cfg, "apm_vel_rel_weight", 1.0d-6, &
+    call CFG_add(cfg, "apm_vel_rel_weight", 1.0d-12, &
          "Relative weight of vel. in the k-d tree compared to position")
     call CFG_add(cfg, "apm_steps_between", 100, &
          "Adapt weight every apm_steps_between steps")

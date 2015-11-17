@@ -33,7 +33,7 @@ program streamer_1d
   integer              :: info_cntr
   integer              :: prev_apm_part
 
-  real(dp)             :: err_goal, small_dens
+  real(dp)             :: small_dens
   real(dp)             :: sim_time, sim_end_time
   real(dp)             :: dt, max_dt
   real(dp)             :: output_dt, min_field
@@ -59,7 +59,6 @@ program streamer_1d
   max_dt        = CFG_fget_real(cfg, "sim_max_dt")
   output_dt     = CFG_fget_real(cfg, "output_interval")
   sim_end_time  = CFG_fget_real(cfg, "sim_end_time")
-  err_goal      = CFG_fget_real(cfg, "sim_rel_error_goal")
   n_steps_apm   = CFG_fget_int(cfg, "apm_steps_between")
   small_dens    = CFG_fget_real(cfg, "fluid_small_density")
   apm_increase  = CFG_fget_real(cfg, "apm_increase_factor")
@@ -225,8 +224,6 @@ contains
          "The maximal timestep in seconds")
     call CFG_add(cfg, "sim_min_field", -1.0d99, &
          "The minimum required electric field")
-    call CFG_add(cfg, "sim_rel_error_goal", 1.0D-4, &
-         "Desired relative error in the solution between consecutive steps")
     call CFG_add(cfg, "sim_name", "sim", &
          "The name of the simulation")
 

@@ -9,8 +9,8 @@ Getting the code:
 
 Compiling the code:
 
-   $ cd streamer_1d
-   $ make
+    $ cd streamer_1d
+    $ make
 
 Running the code:
 

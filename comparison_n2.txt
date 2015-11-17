@@ -1,5 +1,0 @@
-gas_component_fractions = 1.0
-gas_component_names = N2
-gas_crosssec_files = cross_sections_nitrogen.txt
-fluid_input_file = transport_data_nitrogen.txt
-gas_mixture_name = N2

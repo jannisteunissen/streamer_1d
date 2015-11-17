@@ -315,7 +315,9 @@ contains
       real(dp), intent(inout) :: time
 
       call STEP_expl_trap_2d(FL_vars, time, dt, FL_time_derivs)
-      where (FL_vars(:, FL_iv_en) < 0) FL_vars(:, FL_iv_en) = 0
+      if (FL_use_en) then
+         where (FL_vars(:, FL_iv_en) < 0) FL_vars(:, FL_iv_en) = 0
+      end if
       where (FL_vars(:, FL_iv_elec) < 0) FL_vars(:, FL_iv_elec) = 0
    end subroutine FL_advance
 

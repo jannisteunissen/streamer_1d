@@ -110,7 +110,7 @@ program streamer_1d
 
      if (stop_dens) print *, "Stopping because discharge reached boundary"
      if (stop_fld)  print *, "Stopping because field is getting too low"
-     if (stop_time) print *, "Stopping because reached end time"
+     if (stop_time) print *, "Stopping because end time was reached"
      stop_sim = stop_dens .or. stop_fld .or. stop_time
 
      steps = steps + 1
@@ -215,7 +215,7 @@ contains
 
     ! General simulation parameters
     call CFG_add(cfg, "sim_type", "fluid_lfa", &
-         "The type of simulation to run: part, fluid_min, fluid_ee")
+         "The type of simulation to run: part, fluid_lfa, fluid_ee")
     call CFG_add(cfg, "sim_end_time", 3.0D-9, &
          "The desired endtime in seconds of the simulation")
     call CFG_add(cfg, "sim_initial_dt", 3.0D-13, &

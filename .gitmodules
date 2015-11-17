@@ -1,9 +1,0 @@
-[submodule "fosito"]
-	path = fosito
-	url = https://github.com/jannisteunissen/fosito
-[submodule "particle_core"]
-	path = particle_core
-	url = https://github.com/jannisteunissen/particle_core
-[submodule "fluid_core"]
-	path = fluid_core
-	url = https://github.com/jannisteunissen/fluid_core

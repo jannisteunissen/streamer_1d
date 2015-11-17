@@ -1,22 +1,22 @@
-streamer_1d
+Streamer_1d: 1D particle & fluid simulations of streamers
 ===========
 
-This is code for 1d streamer simulations with a particle of fluid code.
+This is code for 1d streamer simulations with a particle or fluid model.
 
-The code uses git submodules, so for the first compilation you should execute
-these commands:
-$ git submodule init
-$ git submodule update
+Getting the code:
+$ git clone https://github.com/jannisteunissen/streamer_1d.git
+
+Compiling the code:
+$ cd streamer_1d
 $ make
 
-After that, you can compile with just
-$ make
-
-Running (sequential):
-$ ./streamer_1d my_config_file.txt
+Running the code:
+$ ./streamer_1d cfg_example_1.txt
+$ ./streamer_1d cfg_example_2.txt
 
 You can also specify multiple configuration files, like:
-$ ./streamer_1d cfg_base.txt cfg_1.txt
+$ ./streamer_1d cfg_example_1.txt my_other_options.txt
 
-In each configuration file, you can specify a different "sim_name" variable.
-These names will be appended to each other.
+The later files will then override earlier options. In each configuration file,
+you can specify a different "sim_name" variable. These names will be appended to
+each other for the output.

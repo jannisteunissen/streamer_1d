@@ -9,7 +9,6 @@ import argparse
 import re
 import numpy as np
 
-from io import StringIO
 
 def getArgs():
     "Set the arguments, read them in, and return them"

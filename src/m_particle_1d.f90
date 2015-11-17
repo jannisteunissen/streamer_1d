@@ -220,15 +220,15 @@ contains
   subroutine PM_adapt_weights()
     real(dp) :: v_fac
     v_fac = PM_vel_rel_weight * PD_dx / PM_part_per_cell
-    
+
     call pc%merge_and_split((/.false., .false., .true./), v_fac, .false., &
          get_desired_weight, PC_merge_part_rxv, PC_split_part)
     call set_elec_density()
     call PM_update_efield()
     call pc%set_accel(accel_func)
 
-    write(*,'(A, E12.4, A, I0)') " After merging real/sim part: ", &
-         pc%get_num_real_part(), " / ", pc%get_num_sim_part()
+    ! write(*,'(A, E12.4, A, I0)') " After merging real/sim part: ", &
+         ! pc%get_num_real_part(), " / ", pc%get_num_sim_part()
   end subroutine PM_adapt_weights
 
   real(dp) function get_desired_weight(my_part)

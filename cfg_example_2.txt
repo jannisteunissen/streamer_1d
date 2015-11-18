@@ -6,7 +6,7 @@
  sim_name = ex2
 
  # The type of simulation to run: part, fluid_lfa, fluid_ee:
- sim_type = fluid_lfa
+ sim_type = fluid_ee
 
  # The desired endtime in seconds of the simulation:
  sim_end_time = 0.3000E-08
@@ -40,6 +40,15 @@
 
  # The input file for the fluid models:
  fluid_input_file = n2_transport_data_dujko.txt
+
+ # Whether to use energy dependent diffusion coefficient:
+ fluid_use_en_dif = T
+
+ # Whether to use energy dependent mobility:
+ fluid_use_en_mob = T
+
+ # Whether to use energy dependent source term:
+ fluid_use_en_src = T
 
  # The names of the gases used in the simulation:
  gas_comp_names = N2
@@ -128,15 +137,6 @@
 
  # Whether to use electron detachment:
  fluid_use_detach = F
-
- # Whether to use energy dependent diffusion coefficient:
- fluid_use_en_dif = F
-
- # Whether to use energy dependent mobility:
- fluid_use_en_mob = F
-
- # Whether to use energy dependent source term:
- fluid_use_en_src = F
 
  # The initial energy of the electrons in eV:
  init_elec_energy = 0.1000E+01

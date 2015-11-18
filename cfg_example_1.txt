@@ -5,7 +5,8 @@
  # The name of the simulation:
  sim_name = ex1
 
- # The type of simulation to run: part, fluid_lfa, fluid_ee:
+ # The type of simulation to run: part, fluid_lfa, fluid_ee: Note that fluid_ee
+ # cannot be used here, since the relevant transport data is missing.
  sim_type = fluid_lfa
 
  # The desired endtime in seconds of the simulation:
@@ -39,7 +40,7 @@
  init_dens = 0.1000E+16
 
  # The input file for the fluid models:
- fluid_input_file = n2_transport_data.txt
+ fluid_input_file = n2_transport_data_siglo.txt
 
  # The names of the gases used in the simulation:
  gas_comp_names = N2

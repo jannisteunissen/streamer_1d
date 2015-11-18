@@ -45,7 +45,7 @@ So if sim_name is "test", and you use a particle model, then the first output wi
     test_p_1.txt
 
 For the fluid model with the local field approximation "fl" is added, and for
-the fluid model with the energy equation "fl_ee" is added. The columns in these files specify the:
+the fluid model with the energy equation "flee" is added. The columns in these files specify the:
 
 1. position (m)
 2. electric field (V/m)

@@ -6,7 +6,7 @@ module m_transport_data
    private
 
    integer, parameter :: dp = kind(0.0d0)
-   integer, parameter :: max_num_rows   = 500 !> The maximum number of rows of transport data for an entry
+   integer, parameter :: max_num_rows   = 7000 !> The maximum number of rows of transport data for an entry
    integer, parameter :: lineLen        = 200
 
    public :: TD_get_td_from_file

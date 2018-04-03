@@ -7,7 +7,7 @@ ifeq ($(DEBUG), 1)
 endif
 
 OBJS	:= m_fluid_dd_1d.o m_model_choice.o m_output_1d.o m_init_cond_1d.o\
-	m_efield_1d.o m_particle_1d.o m_phys_domain.o
+	m_efield_1d.o m_particle_1d.o m_photoi_1d.o m_phys_domain.o
 
 
 
@@ -29,9 +29,10 @@ clean:
 	$(RM) *.o *.mod ../streamer_1d
 
 # Dependency information
-m_fluid_dd_1d.o: 	m_efield_1d.o m_init_cond_1d.o m_model_choice.o m_phys_domain.o
-m_efield_1d.o:		m_phys_domain.o
+m_fluid_dd_1d.o: 	m_efield_1d.o m_init_cond_1d.o m_model_choice.o m_phys_domain.o m_photoi_1d.o
+m_efield_1d.o:		m_phys_domain.o m_init_cond_1d.o
 m_output_1d.o: 		m_model_choice.o m_fluid_dd_1d.o m_particle_1d.o
 m_particle_1d.o: 	m_init_cond_1d.o m_efield_1d.o m_phys_domain.o
 m_init_cond_1d.o:	m_phys_domain.o
+m_photoi_1d.o:    m_phys_domain.o m_init_cond_1d.o
 ../streamer_1d:		$(OBJS)

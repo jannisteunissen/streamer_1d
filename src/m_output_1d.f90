@@ -77,6 +77,7 @@ contains
     case (MODEL_fluid_lfa)
        write(filename, fmt="(A,I0,A)") &
             "output/" // trim(sim_name) // "_fl_", cntr, ".txt"
+
        call FL_get_output(pos_data, sca_data, data_names, &
             n_pos, n_sca, time, OUT_head_density)
 
@@ -89,6 +90,7 @@ contains
           call write_data_2d(filename, pos_data, &
                data_names(n_sca+1:n_sca+n_pos), 30)
        end if
+
 
     case (MODEL_fluid_ee)
        write(filename, fmt="(A,I0,A)") &

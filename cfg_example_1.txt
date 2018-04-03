@@ -10,46 +10,64 @@
  sim_type = fluid_lfa
 
  # The desired endtime in seconds of the simulation:
- sim_end_time = 0.3000E-08
+ sim_end_time = 0.7000E-07
 
  # The initial/fixed timestep in seconds:
- sim_initial_dt = 0.3000E-12
+ sim_initial_dt = 1.0000E-13
 
  # The maximal timestep in seconds:
  sim_max_dt = 0.3000E-12
 
  # The initial electric field:
- sim_applied_efield = 0.1000E+08
+ sim_applied_efield = 2.5000E+06
 
  # The length of a grid cell:
- grid_dx = 0.4000E-05
+ grid_dx = 0.1000E-05
 
  # The number of grid cells:
- grid_size = 1000
+ grid_size = 3400
+ 
+ # The relative permitivity of the dielectric:
+ eps_DI = 1.0000E+01
+ 
+ # The relative position of the dielectric surface (extends to the right of the domain):
+ init_DI_pos = 0.8000E+00
 
  # The background ion and electron density in 1/m^3:
- init_background_density = 0.0000E+00
+ init_background_density = 0.0000E+12
+ 
+ # The maximum number of photons:
+ num_photons = 100000000
 
+ # Photoionization efficiency:
+ photoi_eta = 0.1000E+00
+ 
  # The type of initial condition:
- init_cond_name = gaussian
+ init_cond_name = block
 
  # The relative position of the initial seed:
- init_rel_pos = 0.5000E+00
+ init_rel_pos = 0.1500E+00
 
  # The number of initial ion pairs:
- init_dens = 0.1000E+16
+ init_dens = 0.7000E+19
+ 
+ # Positive ion mobility (m^2/(Vs)):
+ pos_ion_mob = 0.1000E-03
+ 
+ # Positive ion diffusion (m^2/s):
+ pos_ion_diff = 0.4000E-03
 
  # The input file for the fluid models:
- fluid_input_file = n2_transport_data_siglo.txt
+ fluid_input_file = air_transport_data_siglo.txt
 
  # The names of the gases used in the simulation:
- gas_comp_names = N2
+ gas_comp_names = AIR
 
  # The files in which to find cross section data for each gas:
  gas_cs_files = n2_cross_sections_siglo.txt
 
  # The name of the gas mixture used:
- gas_mixture_name = N2
+ gas_mixture_name = AIR
 
  # The partial pressure of the gases:
  gas_comp_fracs = 0.1000E+01
@@ -149,19 +167,22 @@
  init_use_neg_ion = F
 
  # The standard deviation used for Gaussian initial profiles:
- init_width = 0.2500E-04
+ init_width = 0.1000E-03
 
  # The energy range over which to get the EEDF:
  output_eedf_eV_range = 0.0000E+00 0.5000E+02
 
  # The field range(s) over which to get the EEDF:
  output_eedf_min_max_fields = 0.0000E+00 0.1000E+11 0.0000E+00 0.1000E+07
+ 
+ # Positive(+1), negative(-1) or neutral(0) seed:
+ seed_sign = 0
 
  # The density level tracked as streamer head:
  output_head_density = 0.2000E+19
 
  # The timestep for writing output:
- output_interval = 0.1000E-09
+ output_interval = 0.2000E-10
 
  # The number of bins to use for histograms:
  output_num_bins = 200

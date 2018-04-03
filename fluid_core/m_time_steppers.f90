@@ -144,7 +144,6 @@ contains
      real(dp)                       :: vars_t0(size(vars,1), size(vars,2))
 
      vars_t0 = vars
-
      ! Step 1 (at initial time)
      call STEP_forward_euler_2d(vars, time, dt, pptr_get_derivs)
      call STEP_forward_euler_2d(vars, time, dt, pptr_get_derivs)

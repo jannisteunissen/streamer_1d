@@ -4,6 +4,8 @@
 
 module m_efield_1d
   use m_phys_domain
+  use m_init_cond_1d
+  use m_units_constants
   
   implicit none
   private
@@ -12,6 +14,7 @@ module m_efield_1d
   real(dp)              :: EF_applied_field
   real(dp), allocatable :: EF_values(:)
   logical               :: EF_is_constant
+  integer               :: iz_d
 
   public :: EF_initialize
   public :: EF_compute
@@ -36,12 +39,13 @@ contains
     ! defined at -0.5*dx, 0.5*dx, 1.5*dx, 2.5*dx, with the first value equal to the applied field.
     ! These extra values are mostly useful as a buffer for EF_get_at_pos
     allocate(EF_values(PD_grid_size+1))
-    EF_values = EF_applied_field
+    EF_values = 0.0_dp
+    iz_d     = int(INIT_DI/PD_dx+1) 
   end subroutine EF_initialize
 
-  subroutine EF_compute(net_charge)
+  subroutine EF_compute(net_charge, surface_charge)
     use m_units_constants
-    real(dp), intent(in) :: net_charge(:)
+    real(dp), intent(in) :: net_charge(:), surface_charge
     real(dp)             :: conv_fac
     integer              :: iz
 
@@ -50,26 +54,36 @@ contains
        stop
     end if
 
+
+    EF_values = 0.0_dp
     conv_fac = PD_dx / UC_eps0
-    if (.not. EF_is_constant) then
-       do iz = 2, PD_grid_size+1
-          EF_values(iz) = EF_values(iz-1) + net_charge(iz-1) * conv_fac
-       end do
-    end if
+    do iz = 2, iz_d+1
+      EF_values(iz) = EF_values(iz-1) + net_charge(iz-1) * conv_fac
+    end do
+    EF_values(iz_d+1) = (EF_values(iz_d+1) + surface_charge/UC_eps0)/eps_DI
+    do iz = iz_d+2, PD_grid_size+1
+      EF_values(iz) = EF_values(iz-1)
+    end do
+    
+    EF_values(1:iz_d) = EF_values(1:iz_d) + EF_applied_field
+    EF_values(iz_d+1:PD_grid_size+1) = EF_values(iz_d+1:PD_grid_size+1) + EF_applied_field/eps_DI 
+    
+
+    
 
   end subroutine EF_compute
 
-  subroutine EF_compute_and_get_st(net_charge, out_efield)
-    real(dp), intent(in) :: net_charge(:)
+  subroutine EF_compute_and_get_st(net_charge, out_efield, surface_charge)
+    real(dp), intent(in) :: net_charge(:), surface_charge
     real(dp), intent(out) :: out_efield(:)
-    call EF_compute(net_charge)
+    call EF_compute(net_charge, surface_charge)
     call EF_get_values_st(out_efield)
   end subroutine EF_compute_and_get_st
 
-  subroutine EF_compute_and_get(net_charge, out_efield)
-    real(dp), intent(in) :: net_charge(:)
+  subroutine EF_compute_and_get(net_charge, out_efield, surface_charge)
+    real(dp), intent(in) :: net_charge(:), surface_charge
     real(dp), intent(out) :: out_efield(:)
-    call EF_compute(net_charge)
+    call EF_compute(net_charge, surface_charge)
     call EF_get_values(out_efield)
   end subroutine EF_compute_and_get
 
@@ -95,6 +109,7 @@ contains
   subroutine EF_get_values(out_efield)
     real(dp), intent(out) :: out_efield(:)
     out_efield(:) = 0.5_dp * (EF_values(1:PD_grid_size) + EF_values(2:PD_grid_size+1))
+    out_efield(iz_d) = EF_values(iz_d)
   end subroutine EF_get_values
 
   real(dp) function EF_get_min_field()

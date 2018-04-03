@@ -4,6 +4,8 @@ module m_fluid_dd_1d
    use m_lookup_table
    use m_transport_schemes
    use m_phys_domain
+   use m_photoi_1d
+   use m_random
 
    implicit none
    private
@@ -11,7 +13,6 @@ module m_fluid_dd_1d
    integer, parameter :: dp = kind(0.0d0)
    integer               :: FL_num_vars
    integer               :: FL_iv_elec, FL_iv_ion, FL_iv_en, FL_iv_nion
-
    integer               :: FL_if_mob, FL_if_dif, FL_if_src, FL_if_en, &
         FL_if_att, FL_if_det, FL_num_fld_coef
    integer               :: FL_ie_mob, FL_ie_dif, FL_ie_src, FL_ie_att, &
@@ -20,17 +21,27 @@ module m_fluid_dd_1d
         FL_use_en_src, FL_use_detach
 
    real(dp), allocatable :: FL_vars(:,:)
+   real(dp)              :: FL_surface_charge
    real(dp)              :: FL_small_dens
    real(dp)              :: FL_max_energy
+   real(dp)              :: FL_pos_ion_mob, FL_pos_ion_diff
+   real(dp), allocatable :: photo(:)
 
    type(LT_table_t) :: FL_lkp_fld, FL_lkp_en
    procedure(TS_dd_1d_type), pointer :: FL_transport_scheme
+   
+   type(rng_t) :: rng
+
+   integer :: rng_int4_seed(4) = [8123, 91234, 12399, 293434]
 
    public :: FL_init_cfg
    public :: FL_advance
    public :: FL_get_output
    public :: FL_get_coeffs
    public :: FL_max_edens_at_boundary
+   public :: FL_surface_charge
+   public :: photoi_initialize
+   public :: photoi_set_src
 
 contains
 
@@ -58,7 +69,10 @@ contains
       call CFG_get(cfg, "fluid_lkptbl_max_energy", max_energy)
       call CFG_get(cfg, "fluid_lkptbl_max_efield", max_efield)
       call CFG_get(cfg, "fluid_small_density", FL_small_dens)
+      call CFG_get(cfg, "pos_ion_mob", FL_pos_ion_mob)
+      call CFG_get(cfg, "pos_ion_diff", FL_pos_ion_diff)
       FL_max_energy = max_energy
+      
 
       if (MODEL_type == MODEL_fluid_ee) then
          FL_use_en     = .true.
@@ -83,9 +97,10 @@ contains
       if (FL_use_en) then
          FL_num_vars = FL_num_vars + 1
          FL_iv_en = FL_num_vars
-      end if
+      end if  
 
       allocate(FL_vars(PD_grid_size, FL_num_vars))
+      allocate(photo(PD_grid_size))
 
       ! Create a lookup table for the model coefficients
       FL_lkp_fld = LT_create(0.0_dp, max_efield, table_size, 0)
@@ -166,10 +181,12 @@ contains
 
       FL_num_fld_coef = LT_get_num_cols(FL_lkp_fld)
       FL_num_en_coef  = LT_get_num_cols(FL_lkp_en)
-
+      
       ! Initialization of electron and ion density
+      FL_surface_charge = 0.0_dp
       do n = 1, PD_grid_size
          xx = (n-1) * PD_dx
+         call INIT_get_back(xx, FL_vars(n, FL_iv_elec), FL_vars(n, FL_iv_ion))
          call INIT_get_elec_dens(xx, FL_vars(n, FL_iv_elec))
          call INIT_get_ion_dens(xx, FL_vars(n, FL_iv_ion))
          call INIT_get_nion_dens(xx, FL_vars(n, FL_iv_nion))
@@ -189,23 +206,27 @@ contains
    subroutine FL_time_derivs(vars, time, time_derivs)
       use m_efield_1d
       use m_units_constants
+      use m_init_cond_1d
       real(dp), intent(in)        :: vars(:,:), time
       real(dp), intent(out)       :: time_derivs(:,:)
 
-      integer                     :: n_cc
+      integer                     :: n_cc, iz_d
       real(dp), parameter         :: five_third = 5 / 3.0_dp
       real(dp)                    :: inv_delta_x
       real(dp), dimension(size(vars,1)-1) :: &
-           mob_c, dif_c, src_c, att_c, det_c, flux, fld, fld_en, en_loss, mean_en
+           mob_c, dif_c, src_c, att_c, det_c, flux, fld, fld_en, en_loss, mean_en, ones
       real(dp)                    :: source(size(vars,1))
       type(LT_loc_t) :: fld_locs(size(vars,1)-1), en_locs(size(vars,1)-1)
 
       n_cc = size(vars, 1)
+      iz_d     = int(INIT_DI/PD_dx+1) 
       inv_delta_x = 1.0_dp / PD_dx
+      ones = 1.0_dp
 
       ! Get electric field
       source = (vars(:, FL_iv_ion) - vars(:, FL_iv_elec) - vars(:, FL_iv_nion)) * UC_elem_charge
-      call EF_compute_and_get_st(source, fld)
+      source(iz_d+1:PD_grid_size) = 0.0_dp
+      call EF_compute_and_get_st(source, fld, FL_surface_charge)
 
       ! Get locations in the lookup table
       fld_locs = LT_get_loc(FL_lkp_fld, abs(fld))
@@ -241,17 +262,21 @@ contains
 
       ! ~~~ Electron transport ~~~
       call FL_transport_scheme(vars(:, FL_iv_elec), -mob_c * fld, dif_c * inv_delta_x, flux)
+      
 
       ! ~~~ Ionization source ~~~ TODO: try different formulations
-      call set_stagg_source_1d(source, src_c * abs(flux))
-      time_derivs(:, FL_iv_elec) = source
-      time_derivs(:, FL_iv_ion) = source
+      call set_stagg_source_1d(source, (src_c-att_c) * abs(flux))
+      time_derivs(1:iz_d, FL_iv_elec) = source(1:iz_d) + photo(1:iz_d)
+      time_derivs(1:iz_d, FL_iv_ion) = source(1:iz_d) + photo(1:iz_d)
+      time_derivs(iz_d, FL_iv_elec) = time_derivs(iz_d, FL_iv_elec) + sum(photo(iz_d+1:n_cc))
+      time_derivs(iz_d+1:n_cc, FL_iv_elec) = 0.0_dp
+      time_derivs(iz_d+1:n_cc, FL_iv_ion) = 0.0_dp
       time_derivs(:, FL_iv_nion) = 0
 
       ! ~~~ Attachment source ~~~ TODO: try different formulations
-      call set_stagg_source_1d(source, att_c * abs(flux))
-      time_derivs(:, FL_iv_elec) = time_derivs(:, FL_iv_elec) - source
-      time_derivs(:, FL_iv_nion) = time_derivs(:, FL_iv_nion) + source
+      !call set_stagg_source_1d(source, att_c * abs(flux))
+      !time_derivs(:, FL_iv_elec) = time_derivs(:, FL_iv_elec) - source
+      !time_derivs(:, FL_iv_nion) = time_derivs(:, FL_iv_nion) + source
 
       ! Detachment process
       if (FL_use_detach) then
@@ -279,6 +304,11 @@ contains
          time_derivs(:, FL_iv_en) = source
          call add_grad_flux_1d(time_derivs(:, FL_iv_en), flux * inv_delta_x)
       end if
+      
+      flux = 0.0_dp
+      ! ~~~ Positive ion transport ~~~
+      call FL_transport_scheme(vars(:, FL_iv_ion), FL_pos_ion_mob * fld, FL_pos_ion_diff * inv_delta_x * ones, flux)
+      call add_grad_flux_1d(time_derivs(:, FL_iv_ion), flux * inv_delta_x)
 
       ! Dirichlet
       ! time_derivs(1, :) = 0.0_dp
@@ -289,14 +319,16 @@ contains
    end subroutine FL_time_derivs
 
    subroutine set_stagg_source_1d(dens_c, src_f)
+      use m_init_cond_1d
       real(dp), intent(inout) :: dens_c(:)
       real(dp), intent(in)    :: src_f(:)
-      integer                 :: n_cc
+      integer                 :: n_cc, iz_d
 
+      iz_d        = int(INIT_DI/PD_dx+1) 
       n_cc             = size(dens_c)
       dens_c(n_cc)     = 0
-      dens_c(1:n_cc-1) = 0.5_dp * src_f
-      dens_c(2:n_cc)   = dens_c(2:n_cc) + dens_c(1:n_cc-1)
+      dens_c(1:iz_d-1) = 0.5_dp * src_f(1:iz_d-1)
+      dens_c(2:iz_d)   = dens_c(2:iz_d) + dens_c(1:iz_d-1)
    end subroutine set_stagg_source_1d
 
    subroutine add_grad_flux_1d(dens_c, flux_f)
@@ -308,17 +340,67 @@ contains
       dens_c(1:n_cc-1) = dens_c(1:n_cc-1) - flux_f
       dens_c(2:n_cc)   = dens_c(2:n_cc) + flux_f
    end subroutine add_grad_flux_1d
+   
+   subroutine add_s_charge(fld, dt)
+     use m_units_constants
+     use m_init_cond_1d
+     real(dp), intent(in)                 :: dt, fld(PD_grid_size-1)
+     real(dp), dimension(PD_grid_size-1)  :: fluxi, fluxe, ones, mob_c, dif_c
+     integer                              :: iz_d
+     real(dp)                             :: inv_delta_x
+     type(LT_loc_t)                       :: fld_locs(PD_grid_size-1)
+       
+     
+     ones        = 1.0_dp
+     iz_d        = int(INIT_DI/PD_dx+1) 
+     inv_delta_x = 1.0_dp / PD_dx 
+     
+     fld_locs = LT_get_loc(FL_lkp_fld, abs(fld))
+     mob_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_mob, fld_locs)
+     dif_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_dif, fld_locs)
+
+     call FL_transport_scheme(FL_vars(:, FL_iv_ion), FL_pos_ion_mob * fld, FL_pos_ion_diff * inv_delta_x * ones, fluxi)
+     call FL_transport_scheme(FL_vars(:, FL_iv_elec), -mob_c * fld, dif_c * inv_delta_x, fluxe)
+     FL_surface_charge = FL_surface_charge + (max(fluxi(iz_d), 0.0_dp) + max(fluxe(iz_d), 0.0_dp) + &
+                             sum(photo(iz_d+1:PD_grid_size)) * PD_dx) * dt * UC_elem_charge
+     
+   end subroutine add_s_charge
 
    subroutine FL_advance(time, dt)
       use m_time_steppers
-      real(dp), intent(in)    :: dt
+      use m_efield_1d
+      use m_units_constants
+      use m_init_cond_1d
+      real(dp), intent(inout) :: dt
       real(dp), intent(inout) :: time
+      integer                 :: iz_d
+      real(dp)                :: fld(PD_grid_size-1), mob_c(PD_grid_size-1), source(PD_grid_size)
+      type(LT_loc_t)          :: fld_locs(PD_grid_size-1)
+        
+      iz_d = int(INIT_DI/PD_dx+1) 
 
       call STEP_expl_trap_2d(FL_vars, time, dt, FL_time_derivs)
+      source = (FL_vars(:, FL_iv_ion) - FL_vars(:, FL_iv_elec) - FL_vars(:, FL_iv_nion)) * UC_elem_charge 
+      source(iz_d+1:PD_grid_size) = 0.0_dp
+      call EF_compute_and_get_st(source, fld, FL_surface_charge)
+      fld_locs = LT_get_loc(FL_lkp_fld, abs(fld))
+      call add_s_charge(fld, dt)
       if (FL_use_en) then
          where (FL_vars(:, FL_iv_en) < 0) FL_vars(:, FL_iv_en) = 0
       end if
       where (FL_vars(:, FL_iv_elec) < 0) FL_vars(:, FL_iv_elec) = 0
+        
+      FL_vars(iz_d+1:PD_grid_size, FL_iv_elec) = 0.0_dp
+      FL_vars(iz_d+1:PD_grid_size, FL_iv_ion) = 0.0_dp
+        
+        
+      call EF_compute_and_get_st(source, fld, FL_surface_charge)
+      fld_locs = LT_get_loc(FL_lkp_fld, abs(fld))
+      mob_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_mob, fld_locs)
+      dt = 0.9_dp * PD_dx / (epsilon(1.0_dp) + maxval(fld*mob_c))
+
+      if(dt > 1e-13) dt = 1e-13  
+        
    end subroutine FL_advance
 
    subroutine FL_get_output(pos_data, sca_data, data_names, n_pos, n_sca, time, head_density)
@@ -326,12 +408,14 @@ contains
       use m_units_constants
       real(dp), intent(out), allocatable                :: pos_data(:,:), sca_data(:)
       real(dp), intent(in)                              :: time, head_density
-      character(len=*), intent(out), allocatable :: data_names(:)
+      character(len=*), intent(out), allocatable        :: data_names(:)
       integer, intent(out)                              :: n_pos, n_sca
       integer                                           :: n, ix
-      real(dp)                                          :: temp_data(PD_grid_size), fld_en(PD_grid_size)
+      real(dp) , dimension(PD_grid_size)                :: temp_data, fld_en, src_c, att_c, mob_c
+      type(LT_loc_t)                                    :: fld_locs(PD_grid_size)
 
       n_pos = 7
+      if(FL_use_en) n_pos = n_pos + 2
       n_sca = 2
       allocate(pos_data(PD_grid_size, n_pos))
       allocate(sca_data(n_sca))
@@ -344,9 +428,14 @@ contains
       data_names(n_sca+1) = "position (m)"
       pos_data(:,1) = temp_data
 
+
       call EF_compute_and_get((FL_vars(:, FL_iv_ion) - FL_vars(:, FL_iv_elec) - FL_vars(:, FL_iv_nion)) &
-           * UC_elem_charge, temp_data)
+           * UC_elem_charge, temp_data, FL_surface_charge)
       fld_en = LT_get_col(FL_lkp_fld, FL_if_en, abs(temp_data))
+      fld_locs = LT_get_loc(FL_lkp_fld, abs(temp_data))
+      src_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_src, fld_locs)
+      att_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_att, fld_locs)
+      mob_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_mob, fld_locs)
 
       data_names(n_sca+2) = "electric field (V/m)"
       pos_data(:,2) = temp_data
@@ -359,49 +448,58 @@ contains
       sca_data(1) = time
 
       ! Find where the electron density first exceeds head_density and store as head_pos
-      data_names(2) = "head_pos"
+      !data_names(2) = "head_pos"
 
-      ix = -1
-      if (pos_data(1,2) > 0) then ! Check sign of electric field
-         do n = 2, PD_grid_size
-            if (pos_data(n, 3) > head_density) then
-               ix = n
-               exit
-            end if
-         end do
-      else
-         do n = PD_grid_size, 2, -1
-            if (pos_data(n-1, 3) > head_density) then
-               ix = n
-               exit
-            end if
-         end do
-      end if
+      !ix = -1
+      !if (pos_data(1,2) > 0) then ! Check sign of electric field
+      !   do n = 2, PD_grid_size
+      !      if (pos_data(n, 3) > head_density) then
+      !         ix = n
+      !         exit
+      !      end if
+      !   end do
+      !else
+      !   do n = PD_grid_size, 2, -1
+      !      if (pos_data(n-1, 3) > head_density) then
+      !         ix = n
+      !         exit
+      !      end if
+      !   end do
+      !end if
+      
 
-      if (ix == -1) then
-         sca_data(2) = 0
-      else
+      !if (ix == -1) then
+      !   sca_data(2) = 0
+      !else
          ! Interpolate between points ix-1 and ix
-         sca_data(2) = (head_density - pos_data(ix-1, 3)) / (pos_data(ix, 3) - pos_data(ix-1, 3))
-         sca_data(2) = (ix - 2 + sca_data(2)) * PD_dx
-      end if
+      !   write(*,*) pos_data(ix-1, 3), ix
+      !   sca_data(2) = (head_density - pos_data(ix-1, 3)) / (pos_data(ix, 3) - pos_data(ix-1, 3))
+      !   sca_data(2) = (ix - 2 + sca_data(2)) * PD_dx
+      !end if
 
-      data_names(n_sca+4) = "ion density (1/m3)"
+      data_names(n_sca+4) = "pos ion density (1/m3)"
       pos_data(:,4) = FL_vars(:, FL_iv_ion)
 
-      data_names(n_sca+5) = "nion density (1/m3)"
-      pos_data(:,5) = FL_vars(:, FL_iv_nion)
+      data_names(n_sca+5) = "net charge density (1/m3)"
+      pos_data(:,5) = (FL_vars(:, FL_iv_ion) - FL_vars(:, FL_iv_elec) - FL_vars(:, FL_iv_nion)) &
+           * UC_elem_charge
+      
+      data_names(n_sca+6) = "photo-elec density (1/m3)"
+      pos_data(:,6) = photo(:)
+      
+      data_names(n_sca+7) = "impact ionization (s-1m-3)"
+      pos_data(:,7) = FL_vars(:, FL_iv_elec) * abs(temp_data) * (src_c-att_c) * mob_c    
 
-      data_names(n_sca+6) = "energy density (1/m3)"
-      data_names(n_sca+7) = "mean energy (eV/m3)"
 
       if (FL_use_en) then
-         pos_data(:,6) = FL_vars(:, FL_iv_en)
-         pos_data(:,7) = (FL_vars(:, FL_iv_en) + FL_small_dens * fld_en) &
+        data_names(n_sca+8) = "energy density (1/m3)"
+        data_names(n_sca+9) = "mean energy (eV/m3)"
+        pos_data(:,8) = FL_vars(:, FL_iv_en)
+        pos_data(:,9) = (FL_vars(:, FL_iv_en) + FL_small_dens * fld_en) &
               / (FL_small_dens + FL_vars(:, FL_iv_elec))
-      else
-         pos_data(:,6) = FL_vars(:, FL_iv_elec) * fld_en
-         pos_data(:,7) = fld_en
+      !else
+      !   pos_data(:,8) = FL_vars(:, FL_iv_elec) * fld_en
+      !   pos_data(:,9) = fld_en
       end if
 
    end subroutine FL_get_output
@@ -449,5 +547,63 @@ contains
       end if
 
    end subroutine FL_get_coeffs
+
+   !> Initialize photoionization parameters
+   subroutine photoi_initialize(cfg, gas_pressure)
+      use m_photoi_1d
+      use m_config
+      type(CFG_t), intent(inout) :: cfg 
+      real(dp), intent(in)           :: gas_pressure
+      real(dp) :: photoi_eta = 0.1_dp
+
+      call CFG_get(cfg, "photoi_eta", photoi_eta)
+      if (photoi_eta <= 0.0_dp) error stop "photoi%eta <= 0.0"
+      if (photoi_eta > 1.0_dp) error stop "photoi%eta > 1.0"
+
+      call phmc_initialize(cfg, gas_pressure)
+
+   end subroutine photoi_initialize
+
+   !> Sets the photoionization
+   subroutine photoi_set_src(dt, gas_pressure, photoi_eta)
+     use m_photoi_1d
+     use m_random
+     use m_efield_1d
+     use m_units_constants
+     real(dp), intent(in)              :: dt
+     real(dp), intent(in)              :: gas_pressure, photoi_eta
+     real(dp), parameter               :: p_quench = 40.0e-3_dp
+     real(dp)                          :: quench_fac, src(PD_grid_size)
+     real(dp), dimension(PD_grid_size) :: vel, alpha, fld
+     real(dp)                          :: source(PD_grid_size)
+     type(LT_loc_t)                    :: fld_locs(PD_grid_size)
+       
+     call EF_compute_and_get((FL_vars(:, FL_iv_ion) - FL_vars(:, FL_iv_elec) - FL_vars(:, FL_iv_nion)) &
+          * UC_elem_charge, fld, FL_surface_charge)   
+     fld_locs = LT_get_loc(FL_lkp_fld, abs(fld))
+     vel = LT_get_col_at_loc(FL_lkp_fld, FL_if_mob, fld_locs) * abs(fld)
+     alpha = LT_get_col_at_loc(FL_lkp_fld, FL_if_src, fld_locs)     
+
+     quench_fac = p_quench / (gas_pressure + p_quench)
+     rng_int4_seed = get_random_seed()
+
+     src = vel * alpha * FL_vars(:, FL_iv_elec) * quench_fac * 0.1_dp
+     where (src < 0) src = 0
+     
+     call phmc_set_src_1d(rng, src, photo, dt)
+
+   end subroutine photoi_set_src
+   
+   !> Get a random seed based on the current time
+   function get_random_seed() result(seed)
+     integer :: seed(4)
+     integer :: time, i
+
+     call system_clock(time)
+     do i = 1, 4
+        seed(i) = ishftc(time, i*8)
+     end do
+   end function get_random_seed
+   
 
 end module m_fluid_dd_1d

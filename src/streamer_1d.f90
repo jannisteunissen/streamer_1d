@@ -21,6 +21,7 @@ program streamer_1d
   use m_fluid_dd_1d
   use m_particle_1d
   use m_phys_domain
+  use m_photoi_1d
 
   implicit none
 
@@ -38,7 +39,7 @@ program streamer_1d
   real(dp)             :: dt, max_dt
   real(dp)             :: output_dt, min_field
   real(dp)             :: time_now, time_start
-  real(dp)             :: apm_increase
+  real(dp)             :: apm_increase, gas_pressure, photoi_eta
 
   logical              :: do_apm
   logical              :: stop_dens, stop_fld, stop_time, stop_sim
@@ -83,12 +84,10 @@ program streamer_1d
         end if
         info_cntr = info_cntr + 1
      end if
-
      if (sim_time >= output_cntr * output_dt .or. stop_sim) then
         output_cntr = output_cntr + 1
         call OUT_write_vars(sim_name, output_cntr, sim_time)
      end if
-
      if (stop_sim) exit ! Exit after output
 
      select case (MODEL_type)
@@ -101,17 +100,15 @@ program streamer_1d
         sim_time = sim_time + dt
         stop_dens = (PM_max_edens_at_boundary() > small_dens)
      case (MODEL_fluid_lfa, MODEL_fluid_ee)
-        call FL_advance(sim_time, dt)
-        stop_dens = (FL_max_edens_at_boundary() > small_dens)
+      if (mod(steps, 8) == 0) call photoi_set_src(dt, gas_pressure, photoi_eta)   
+      call FL_advance(sim_time, dt)
      end select
 
      stop_fld  = EF_get_min_field() < min_field
      stop_time = sim_time > sim_end_time
 
-     if (stop_dens) print *, "Stopping because discharge reached boundary"
-     if (stop_fld)  print *, "Stopping because field is getting too low"
      if (stop_time) print *, "Stopping because end time was reached"
-     stop_sim = stop_dens .or. stop_fld .or. stop_time
+     stop_sim = stop_time
 
      steps = steps + 1
   end do
@@ -130,13 +127,14 @@ contains
     type(CFG_t), intent(inout)        :: cfg
     integer                           :: ix
     integer                           :: nn, n_gas_comp
-    integer                           :: n_cs_files
+    integer                           :: n_cs_files, photoi_per_steps
     character(len=s_len)              :: MODEL_type_name
     character(len=s_len)              :: cfg_name, tmp_name, prev_name
     character(len=s_len), allocatable :: comp_names(:)
     character(len=s_len), allocatable :: cs_files(:)
     real(dp), allocatable             :: comp_fracs(:)
     type(CS_t), allocatable           :: cross_secs(:)
+      
 
     call create_sim_config(cfg)      ! Create default parameters for the simulation
     call CFG_sort(cfg)
@@ -157,6 +155,7 @@ contains
     end do
 
     call CFG_get(cfg, "sim_type", MODEL_type_name)
+    !call CFG_get(cfg, "photoi_per_steps", photoi_per_steps)
     call CFG_write(cfg, "output/" // trim(sim_name) // "_config.txt")
 
     call MODEL_initialize(MODEL_type_name)
@@ -176,10 +175,10 @@ contains
     call GAS_initialize(comp_names, comp_fracs, &
          CFG_fget_real(cfg, "gas_pressure"), &
          CFG_fget_real(cfg, "gas_temperature"))
-    call EF_initialize(cfg)
     call INIT_init(cfg)
+    call EF_initialize(cfg)
+    call photoi_initialize(cfg, gas_pressure)
     call OUT_init(cfg)
-
     select case (MODEL_type)
     case (MODEL_part)
        call CFG_get_size(cfg, "gas_cs_files", n_cs_files)
@@ -246,9 +245,17 @@ contains
          "The files in which to find cross section data for each gas", .true.)
     call CFG_add(cfg, "gas_comp_fracs", (/1.0_dp /), &
          "The partial pressure of the gases", .true.)
+    call CFG_add(cfg, "num_photons", 100000, &
+         "The maximum number of photons")
+    call CFG_add(cfg, "photoi_eta", 0.1_dp, &
+         "Photoionization efficiency")
+    call CFG_add(cfg, "pos_ion_mob", 0.0004_dp, &
+         "Positive ion mobility (m^2/(Vs))")
+    call CFG_add(cfg, "pos_ion_diff", 0.0001_dp, &
+        "Positive ion diffusion (m^2/s)")
 
     ! Electric field parameters
-    call CFG_add(cfg, "sim_applied_efield", 1.0D7, &
+    call CFG_add(cfg, "sim_applied_efield", 1.0D6, &
          "The initial electric field")
     call CFG_add(cfg, "sim_constant_efield", .false., &
          "Whether the electric field is kept constant")
@@ -264,15 +271,21 @@ contains
          "The number of initial simulation particles")
     call CFG_add(cfg, "init_elec_energy", 1.0D0 , &
          "The initial energy of the electrons in eV")
-    call CFG_add(cfg, "init_rel_pos", 0.5D0, &
+    call CFG_add(cfg, "init_rel_pos", 0.3D0, &
          "The relative position of the initial seed")
+    call CFG_add(cfg, "init_DI_pos", 0.7D0, &
+         "The relative position of the dielectric surface (extends to the right of the domain)")
+    call CFG_add(cfg, "seed_sign", 1, &
+         "Positive(+1), negative(-1) or neutral(0) seed")     
+    call CFG_add(cfg, "eps_DI", 1.0D0, &
+         "The relative permitivity of the dielectric")      
     call CFG_add(cfg, "init_width", 25.0d-6, &
          "The standard deviation used for Gaussian initial profiles")
-    call CFG_add(cfg, "init_background_density", 0.0D0, &
+    call CFG_add(cfg, "init_background_density", 0.1D9, &
          "The background ion and electron density in 1/m^3")
 
     ! Output parameters
-    call CFG_add(cfg, "output_interval", 1.0D-10, &
+    call CFG_add(cfg, "output_interval", 0.2D-10, &
          "The timestep for writing output")
     call CFG_add(cfg, "output_head_density", 2.0D18, &
          "The density level tracked as streamer head")

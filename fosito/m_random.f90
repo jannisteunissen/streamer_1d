@@ -34,6 +34,7 @@ module m_random
 
 contains
 
+
   subroutine set_seed(self, seed)
     class(RNG_t), intent(out) :: self
     integer(i4), intent(in)   :: seed(4)

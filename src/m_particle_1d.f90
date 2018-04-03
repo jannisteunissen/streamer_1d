@@ -10,7 +10,7 @@ module m_particle_1d
   integer, parameter    :: PM_iv_elec  = 1, PM_iv_ion = 2, PM_iv_en = 3
 
   real(dp), allocatable :: PM_vars(:,:)
-  real(dp)              :: PM_transverse_area
+  real(dp)              :: PM_transverse_area, PM_surface_charge
   real(dp)              :: PM_grid_volume, PM_inv_grid_volume
   real(dp)              :: PM_part_per_cell, PM_vel_rel_weight
 
@@ -25,6 +25,7 @@ module m_particle_1d
   public :: PM_get_num_sim_part
   public :: PM_get_num_real_part
   public :: PM_get_coeffs
+  public :: PM_surface_charge
 
 contains
 
@@ -69,6 +70,7 @@ contains
     call pc%initialize(UC_elec_mass, cross_secs, tbl_size, max_ev, n_part_max)
     call pc%set_coll_callback(coll_callback)
 
+    PM_surface_charge = 0.0_dp
     ! Initialization of electron and ion density
     do n = 1, PD_grid_size
        xx = (n-1) * PD_dx
@@ -191,7 +193,7 @@ contains
   subroutine PM_update_efield()
     use m_efield_1d
     use m_units_constants
-    call EF_compute((PM_vars(:, PM_iv_ion) - PM_vars(:, PM_iv_elec)) * UC_elem_charge)
+    call EF_compute((PM_vars(:, PM_iv_ion) - PM_vars(:, PM_iv_elec)) * UC_elem_charge, PM_surface_charge)
   end subroutine PM_update_efield
 
   function accel_func(my_part) result(accel)
@@ -272,7 +274,7 @@ contains
     pos_data(:,1) = temp_data
 
     call EF_compute_and_get((PM_vars(:, PM_iv_ion) - PM_vars(:, PM_iv_elec)) * &
-         UC_elem_charge, temp_data)
+         UC_elem_charge, temp_data, PM_surface_charge)
     data_names(n_sca+2) = "electric field (V/m)"
     pos_data(:,2) = temp_data
 

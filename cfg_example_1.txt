@@ -18,14 +18,14 @@
  # The maximal timestep in seconds:
  sim_max_dt = 0.3000E-12
 
- # The initial electric field:
- sim_applied_efield = 2.5000E+06
+ # Potential appled on the left (right end is grounded):
+ pot_left = 0.5000E+04
 
  # The length of a grid cell:
  grid_dx = 0.1000E-05
 
  # The number of grid cells:
- grid_size = 3400
+ grid_size = 2000
  
  # The relative permitivity of the dielectric:
  eps_DI = 1.0000E+01
@@ -34,7 +34,7 @@
  init_DI_pos = 0.8000E+00
 
  # The background ion and electron density in 1/m^3:
- init_background_density = 0.0000E+12
+ init_background_density = 0.1000E+12
  
  # The maximum number of photons:
  num_photons = 100000000
@@ -46,7 +46,7 @@
  init_cond_name = block
 
  # The relative position of the initial seed:
- init_rel_pos = 0.1500E+00
+ init_rel_pos = 0.2000E+00
 
  # The number of initial ion pairs:
  init_dens = 0.7000E+19

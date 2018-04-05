@@ -255,8 +255,8 @@ contains
         "Positive ion diffusion (m^2/s)")
 
     ! Electric field parameters
-    call CFG_add(cfg, "sim_applied_efield", 1.0D6, &
-         "The initial electric field")
+    call CFG_add(cfg, "pot_left", 1.0D3, &
+         "Potential appled on the left (right end is grounded)")
     call CFG_add(cfg, "sim_constant_efield", .false., &
          "Whether the electric field is kept constant")
 

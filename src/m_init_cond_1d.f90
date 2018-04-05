@@ -19,8 +19,8 @@ module m_init_cond_1d
   integer             :: INIT_seed_sign, FL_if_elec, FL_if_ion 
   logical             :: INIT_use_nion
   real(dp)            :: INIT_back
-  character(len=100)  :: input_file
-  type(LT_table_t)    :: FL_lkp
+  !character(len=100)  :: input_file
+  !type(LT_table_t)    :: FL_lkp
   
   
 
@@ -45,8 +45,8 @@ contains
     character(len=20)       :: init_name
     real(dp), allocatable   :: x_data(:), y_data(:)                       
     
-    input_file = "input/air_transport_data_siglo.txt"
-    FL_lkp = LT_create(0.0_dp, 0.005_dp, 1000, 0)
+    !input_file = "input/air_transport_data_siglo.txt"
+    !FL_lkp = LT_create(0.0_dp, 0.005_dp, 1000, 0)
     
 
     ! Get the type of initial condition
@@ -75,15 +75,15 @@ contains
     call CFG_get(cfg, "init_background_density", INIT_back)
     
     
-    call TD_get_td_from_file(input_file, "AIR", &
-         trim("elec"), x_data, y_data)
-    call LT_add_col(FL_lkp, x_data, y_data)
-    FL_if_elec = LT_get_num_cols(FL_lkp)
+    !call TD_get_td_from_file(input_file, "AIR", &
+    !     trim("elec"), x_data, y_data)
+    !call LT_add_col(FL_lkp, x_data, y_data)
+    !FL_if_elec = LT_get_num_cols(FL_lkp)
 
-    call TD_get_td_from_file(input_file, 'AIR', &
-         trim('ion'), x_data, y_data)
-    call LT_add_col(FL_lkp, x_data, y_data)
-    FL_if_ion = LT_get_num_cols(FL_lkp)
+    !call TD_get_td_from_file(input_file, 'AIR', &
+    !     trim('ion'), x_data, y_data)
+    !call LT_add_col(FL_lkp, x_data, y_data)
+    !FL_if_ion = LT_get_num_cols(FL_lkp)
     
   end subroutine INIT_init
 
@@ -113,8 +113,8 @@ contains
       elec_dens = 0.0_dp
       ion_dens = 0.0_dp
     else
-      elec_dens = 0.0_dp
-      ion_dens  = 0.0_dp
+      elec_dens = INIT_back
+      ion_dens  = INIT_back
     end if
     
   end subroutine INIT_get_back
@@ -125,11 +125,8 @@ contains
     type(LT_loc_t)             :: loc
     
     if((INIT_DI-xx) > 0) then
-      loc = LT_get_loc(FL_lkp, INIT_DI-xx)
-      elec_dens = LT_get_col_at_loc(FL_lkp, FL_if_elec, loc)
+      if (.not. INIT_use_nion .and. (INIT_seed_sign == -1 .or. INIT_seed_sign == 0)) call get_dens(xx, elec_dens)
     end if
-
-    !if (.not. INIT_use_nion .and. (INIT_seed_sign == -1 .or. INIT_seed_sign == 0)) call get_dens(xx, elec_dens)
   end subroutine INIT_get_elec_dens
 
   subroutine INIT_get_nion_dens(xx, nion_dens)
@@ -145,13 +142,9 @@ contains
     real(dp), intent(out) :: ion_dens
     type(LT_loc_t)             :: loc
     
-    if((INIT_DI-xx) > 0) then
-      loc = LT_get_loc(FL_lkp, INIT_DI-xx)
-      ion_dens = LT_get_col_at_loc(FL_lkp, FL_if_ion, loc)
-    end if    
-    
-    !if (INIT_seed_sign == 1 .or. INIT_seed_sign == 0) call get_dens(xx, ion_dens)
-
+    if((INIT_DI-xx) > 0) then 
+      if (INIT_seed_sign == 1 .or. INIT_seed_sign == 0) call get_dens(xx, ion_dens)
+    end if
   end subroutine INIT_get_ion_dens
 
 

@@ -11,7 +11,7 @@ module m_efield_1d
   private
 
   integer, parameter :: dp = kind(0.0d0)
-  real(dp)              :: EF_applied_field
+  real(dp)              :: pot_left ! potential 0 on the right
   real(dp), allocatable :: EF_values(:)
   logical               :: EF_is_constant
   integer               :: iz_d
@@ -24,6 +24,7 @@ module m_efield_1d
   public :: EF_get_values
   public :: EF_get_values_st
   public :: EF_get_min_field
+  public :: pot_left
 
 contains
 
@@ -31,7 +32,7 @@ contains
     use m_config
     type(CFG_t), intent(in) :: cfg
 
-    call CFG_get(cfg, "sim_applied_efield", EF_applied_field)
+    call CFG_get(cfg, "pot_left", pot_left)
     call CFG_get(cfg, "sim_constant_efield", EF_is_constant)
 
     ! The electric field is defined at cell faces, so it includes one extra point.
@@ -46,7 +47,7 @@ contains
   subroutine EF_compute(net_charge, surface_charge)
     use m_units_constants
     real(dp), intent(in) :: net_charge(:), surface_charge
-    real(dp)             :: conv_fac
+    real(dp)             :: conv_fac, E_corr_gas, E_corr_eps, E_corr_homog
     integer              :: iz
 
     if (size(net_charge) /= PD_grid_size) then
@@ -65,8 +66,13 @@ contains
       EF_values(iz) = EF_values(iz-1)
     end do
     
-    EF_values(1:iz_d) = EF_values(1:iz_d) + EF_applied_field
-    EF_values(iz_d+1:PD_grid_size+1) = EF_values(iz_d+1:PD_grid_size+1) + EF_applied_field/eps_DI 
+    E_corr_homog = (pot_left - sum(EF_values(:))*PD_dx)/PD_length 
+    
+    E_corr_gas = E_corr_homog / (INIT_DI + (1-INIT_DI)/eps_DI)
+    E_corr_eps = E_corr_gas / eps_DI    
+    
+    EF_values(1:iz_d) = EF_values(1:iz_d) + E_corr_gas
+    EF_values(iz_d+1:PD_grid_size+1) = EF_values(iz_d+1:PD_grid_size+1) + E_corr_eps
     
 
     
@@ -84,7 +90,7 @@ contains
     real(dp), intent(in) :: net_charge(:), surface_charge
     real(dp), intent(out) :: out_efield(:)
     call EF_compute(net_charge, surface_charge)
-    call EF_get_values(out_efield)
+    call EF_get_values(out_efield, surface_charge)
   end subroutine EF_compute_and_get
 
   !> Get the electric field at a position in the domain (useful for the particle model)
@@ -106,10 +112,11 @@ contains
   end function EF_get_at_pos
 
   !> Get a copy of the electric field at cell centers
-  subroutine EF_get_values(out_efield)
+  subroutine EF_get_values(out_efield, surface_charge)
+    real(dp), intent(in)  :: surface_charge
     real(dp), intent(out) :: out_efield(:)
     out_efield(:) = 0.5_dp * (EF_values(1:PD_grid_size) + EF_values(2:PD_grid_size+1))
-    out_efield(iz_d) = EF_values(iz_d)
+    out_efield(iz_d) = 0.5_dp * EF_values(iz_d) + 0.5_dp * (eps_DI * EF_values(iz_d+1) - surface_charge/UC_eps0)
   end subroutine EF_get_values
 
   real(dp) function EF_get_min_field()

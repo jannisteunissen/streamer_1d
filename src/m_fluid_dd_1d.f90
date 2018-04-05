@@ -268,7 +268,7 @@ contains
       call set_stagg_source_1d(source, (src_c-att_c) * abs(flux))
       time_derivs(1:iz_d, FL_iv_elec) = source(1:iz_d) + photo(1:iz_d)
       time_derivs(1:iz_d, FL_iv_ion) = source(1:iz_d) + photo(1:iz_d)
-      time_derivs(iz_d, FL_iv_elec) = time_derivs(iz_d, FL_iv_elec) + sum(photo(iz_d+1:n_cc))
+      time_derivs(iz_d, FL_iv_elec) = time_derivs(iz_d, FL_iv_elec) !+ sum(photo(iz_d+1:n_cc))
       time_derivs(iz_d+1:n_cc, FL_iv_elec) = 0.0_dp
       time_derivs(iz_d+1:n_cc, FL_iv_ion) = 0.0_dp
       time_derivs(:, FL_iv_nion) = 0
@@ -361,8 +361,8 @@ contains
 
      call FL_transport_scheme(FL_vars(:, FL_iv_ion), FL_pos_ion_mob * fld, FL_pos_ion_diff * inv_delta_x * ones, fluxi)
      call FL_transport_scheme(FL_vars(:, FL_iv_elec), -mob_c * fld, dif_c * inv_delta_x, fluxe)
-     FL_surface_charge = FL_surface_charge + (max(fluxi(iz_d), 0.0_dp) + max(fluxe(iz_d), 0.0_dp) + &
-                             sum(photo(iz_d+1:PD_grid_size)) * PD_dx) * dt * UC_elem_charge
+     FL_surface_charge = FL_surface_charge + (max(fluxi(iz_d), 0.0_dp) + max(fluxe(iz_d), 0.0_dp))* dt * UC_elem_charge !+ &
+                             !sum(photo(iz_d+1:PD_grid_size)) * PD_dx) * dt * UC_elem_charge
      
    end subroutine add_s_charge
 

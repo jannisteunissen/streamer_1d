@@ -400,7 +400,7 @@ contains
       fld_locs = LT_get_loc(FL_lkp_fld, abs(fld))
       mob_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_mob, fld_locs)
       dt = min(0.6_dp * PD_dx / (epsilon(1.0_dp) + maxval(fld*mob_c)), &
-           0.1_dp * UC_eps0/(UC_elem_charge * maxval(mob_c * 0.5 * (FL_vars(1:PD_grid_size-1, FL_iv_elec) + &
+           0.5_dp * UC_eps0/(UC_elem_charge * maxval(mob_c * 0.5 * (FL_vars(1:PD_grid_size-1, FL_iv_elec) + &
            FL_vars(2:PD_grid_size, FL_iv_elec)))))
 
       if(dt > 1e-13) dt = 1e-13  

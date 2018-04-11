@@ -19,37 +19,34 @@
  sim_max_dt = 0.3000E-12
 
  # Potential appled on the left (right end is grounded):
- pot_left = 0.5000E+04
+ pot_left = 0.3000E+04
 
  # The length of a grid cell:
  grid_dx = 0.1000E-05
 
  # The number of grid cells:
- grid_size = 2000
+ grid_size = 3000
  
  # The relative permitivity of the dielectric:
- eps_DI = 1.0000E+01
+ eps_DI = 1.0000E+02
+ 
+ # Photoemission yield for high energy photons:
+ photo_yield = 1.0000E+00
  
  # The relative position of the dielectric surface (extends to the right of the domain):
  init_DI_pos = 0.8000E+00
 
  # The background ion and electron density in 1/m^3:
- init_background_density = 0.1000E+12
- 
- # The maximum number of photons:
- num_photons = 100000000
-
- # Photoionization efficiency:
- photoi_eta = 0.1000E+00
+ init_background_density = 0.1000E+09
  
  # The type of initial condition:
- init_cond_name = block
+ init_cond_name = gaussian
 
  # The relative position of the initial seed:
- init_rel_pos = 0.2000E+00
+ init_rel_pos = 0.2500E+00
 
  # The number of initial ion pairs:
- init_dens = 0.7000E+19
+ init_dens = 0.1000E+17
  
  # Positive ion mobility (m^2/(Vs)):
  pos_ion_mob = 0.1000E-03
@@ -167,7 +164,7 @@
  init_use_neg_ion = F
 
  # The standard deviation used for Gaussian initial profiles:
- init_width = 0.1000E-03
+ init_width = 0.5000E-04
 
  # The energy range over which to get the EEDF:
  output_eedf_eV_range = 0.0000E+00 0.5000E+02
@@ -176,7 +173,7 @@
  output_eedf_min_max_fields = 0.0000E+00 0.1000E+11 0.0000E+00 0.1000E+07
  
  # Positive(+1), negative(-1) or neutral(0) seed:
- seed_sign = 0
+ seed_sign = 1
 
  # The density level tracked as streamer head:
  output_head_density = 0.2000E+19

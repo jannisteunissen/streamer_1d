@@ -26,6 +26,7 @@ module m_fluid_dd_1d
    real(dp)              :: FL_max_energy
    real(dp)              :: FL_pos_ion_mob, FL_pos_ion_diff
    real(dp), allocatable :: photo(:)
+   real(dp)              :: photo_yield
 
    type(LT_table_t) :: FL_lkp_fld, FL_lkp_en
    procedure(TS_dd_1d_type), pointer :: FL_transport_scheme
@@ -268,7 +269,7 @@ contains
       call set_stagg_source_1d(source, (src_c-att_c) * abs(flux))
       time_derivs(1:iz_d, FL_iv_elec) = source(1:iz_d) + photo(1:iz_d)
       time_derivs(1:iz_d, FL_iv_ion) = source(1:iz_d) + photo(1:iz_d)
-      time_derivs(iz_d, FL_iv_elec) = time_derivs(iz_d, FL_iv_elec) !+ sum(photo(iz_d+1:n_cc))
+      time_derivs(iz_d, FL_iv_elec) = time_derivs(iz_d, FL_iv_elec) + sum(photo(iz_d+1:n_cc)) * photo_yield
       time_derivs(iz_d+1:n_cc, FL_iv_elec) = 0.0_dp
       time_derivs(iz_d+1:n_cc, FL_iv_ion) = 0.0_dp
       time_derivs(:, FL_iv_nion) = 0
@@ -361,8 +362,9 @@ contains
 
      call FL_transport_scheme(FL_vars(:, FL_iv_ion), FL_pos_ion_mob * fld, FL_pos_ion_diff * inv_delta_x * ones, fluxi)
      call FL_transport_scheme(FL_vars(:, FL_iv_elec), -mob_c * fld, dif_c * inv_delta_x, fluxe)
-     FL_surface_charge = FL_surface_charge + (max(fluxi(iz_d), 0.0_dp) + max(fluxe(iz_d), 0.0_dp))* dt * UC_elem_charge !+ &
-                             !sum(photo(iz_d+1:PD_grid_size)) * PD_dx) * dt * UC_elem_charge
+     FL_surface_charge = FL_surface_charge + (max(fluxi(iz_d), 0.0_dp) + max(fluxe(iz_d), 0.0_dp)+ &
+                              sum(photo(iz_d+1:PD_grid_size)) * photo_yield * PD_dx) * dt * UC_elem_charge
+                    
      
    end subroutine add_s_charge
 
@@ -397,7 +399,9 @@ contains
       call EF_compute_and_get_st(source, fld, FL_surface_charge)
       fld_locs = LT_get_loc(FL_lkp_fld, abs(fld))
       mob_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_mob, fld_locs)
-      dt = 0.9_dp * PD_dx / (epsilon(1.0_dp) + maxval(fld*mob_c))
+      dt = min(0.6_dp * PD_dx / (epsilon(1.0_dp) + maxval(fld*mob_c)), &
+           0.1_dp * UC_eps0/(UC_elem_charge * maxval(mob_c * 0.5 * (FL_vars(1:PD_grid_size-1, FL_iv_elec) + &
+           FL_vars(2:PD_grid_size, FL_iv_elec)))))
 
       if(dt > 1e-13) dt = 1e-13  
         
@@ -484,11 +488,11 @@ contains
       pos_data(:,5) = (FL_vars(:, FL_iv_ion) - FL_vars(:, FL_iv_elec) - FL_vars(:, FL_iv_nion)) &
            * UC_elem_charge
       
-      data_names(n_sca+6) = "photo-elec density (1/m3)"
+      data_names(n_sca+6) = "photo-elec density (1/(s m3))"
       pos_data(:,6) = photo(:)
       
-      data_names(n_sca+7) = "impact ionization (s-1m-3)"
-      pos_data(:,7) = FL_vars(:, FL_iv_elec) * abs(temp_data) * (src_c-att_c) * mob_c    
+      data_names(n_sca+7) = "impact ion (1/(s m3))"
+      pos_data(:,7) = FL_vars(:, FL_iv_elec) * abs(temp_data) * (src_c-att_c) * mob_c   
 
 
       if (FL_use_en) then
@@ -556,9 +560,8 @@ contains
       real(dp), intent(in)           :: gas_pressure
       real(dp) :: photoi_eta = 0.1_dp
 
-      call CFG_get(cfg, "photoi_eta", photoi_eta)
-      if (photoi_eta <= 0.0_dp) error stop "photoi%eta <= 0.0"
-      if (photoi_eta > 1.0_dp) error stop "photoi%eta > 1.0"
+      call CFG_get(cfg, "photo_yield", photo_yield)
+
 
       call phmc_initialize(cfg, gas_pressure)
 

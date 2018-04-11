@@ -245,14 +245,12 @@ contains
          "The files in which to find cross section data for each gas", .true.)
     call CFG_add(cfg, "gas_comp_fracs", (/1.0_dp /), &
          "The partial pressure of the gases", .true.)
-    call CFG_add(cfg, "num_photons", 100000, &
-         "The maximum number of photons")
-    call CFG_add(cfg, "photoi_eta", 0.1_dp, &
-         "Photoionization efficiency")
     call CFG_add(cfg, "pos_ion_mob", 0.0004_dp, &
          "Positive ion mobility (m^2/(Vs))")
     call CFG_add(cfg, "pos_ion_diff", 0.0001_dp, &
         "Positive ion diffusion (m^2/s)")
+    call CFG_add(cfg, "photo_yield", 0.1_dp, &
+        "Photoemission yield for high energy photons")
 
     ! Electric field parameters
     call CFG_add(cfg, "pot_left", 1.0D3, &

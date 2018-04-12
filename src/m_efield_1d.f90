@@ -48,6 +48,7 @@ contains
     use m_units_constants
     real(dp), intent(in) :: net_charge(:), surface_charge
     real(dp)             :: conv_fac, E_corr_gas, E_corr_eps, E_corr_homog
+    real(dp)             :: pot_diff, dielectric_field
     integer              :: iz
 
     if (size(net_charge) /= PD_grid_size) then
@@ -55,28 +56,42 @@ contains
        stop
     end if
 
+    ! iz_d is last cell-centered index before the dielectric
 
-    EF_values = 0.0_dp
+    ! First we start from a guess EF_values(1) = 0. EF_values are defined at
+    ! cell faces, and EF_values(1) is the electric field at the left domain
+    ! boundary.
+    EF_values(1) = 0.0_dp
+
+    ! Handle the region outside the dielectric
     conv_fac = PD_dx / UC_eps0
     do iz = 2, iz_d+1
-      EF_values(iz) = EF_values(iz-1) + net_charge(iz-1) * conv_fac
+       EF_values(iz) = EF_values(iz-1) + net_charge(iz-1) * conv_fac
     end do
-    EF_values(iz_d+1) = (EF_values(iz_d+1) + surface_charge/UC_eps0)/eps_DI
+
+    ! Note that on the dielectric boundary, the electric field is different on
+    ! both sides, but we only store the 'left' side outside the dielectric for
+    ! now.
+
+    ! Add surface charge to constant field inside dielectric
+    dielectric_field = (EF_values(iz_d+1) + surface_charge / UC_eps0) / eps_DI
+
     do iz = iz_d+2, PD_grid_size+1
-      EF_values(iz) = EF_values(iz-1)
+       EF_values(iz) = dielectric_field
     end do
-    
-    E_corr_homog = (pot_left - sum(EF_values(:))*PD_dx)/PD_length 
-    
-    E_corr_gas = E_corr_homog / (INIT_DI + (1-INIT_DI)/eps_DI)
-    E_corr_eps = E_corr_gas / eps_DI    
-    
-    EF_values(1:iz_d) = EF_values(1:iz_d) + E_corr_gas
-    EF_values(iz_d+1:PD_grid_size+1) = EF_values(iz_d+1:PD_grid_size+1) + E_corr_eps
-    
 
-    
+    ! Compute total potential difference with the wanted solution. Here we
+    ! assign a weight of 0.5 to the first and last face-centered value.
+    pot_diff = pot_left - PD_dx * (sum(EF_values(2:PD_grid_size)) + &
+         0.5_dp * (EF_values(1) + EF_values(PD_grid_size+1)))
 
+    ! Use the fact that epsilon is one on the left. INIT_DI is the position of
+    ! the dielectric in the domain.
+    E_corr_gas = pot_diff / (INIT_DI + (PD_length-INIT_DI)/eps_DI)
+    E_corr_eps = E_corr_gas / eps_DI
+
+    EF_values(1:iz_d+1) = EF_values(1:iz_d+1) + E_corr_gas
+    EF_values(iz_d+2:PD_grid_size+1) = EF_values(iz_d+2:PD_grid_size+1) + E_corr_eps
   end subroutine EF_compute
 
   subroutine EF_compute_and_get_st(net_charge, out_efield, surface_charge)
@@ -115,8 +130,12 @@ contains
   subroutine EF_get_values(out_efield, surface_charge)
     real(dp), intent(in)  :: surface_charge
     real(dp), intent(out) :: out_efield(:)
-    out_efield(:) = 0.5_dp * (EF_values(1:PD_grid_size) + EF_values(2:PD_grid_size+1))
-    out_efield(iz_d) = 0.5_dp * EF_values(iz_d) + 0.5_dp * (eps_DI * EF_values(iz_d+1) - surface_charge/UC_eps0)
+
+    ! Average field on left and right face
+    out_efield(1:iz_d) = 0.5_dp * (EF_values(1:iz_d) + EF_values(2:iz_d+1))
+
+    ! Inside the dielectric, the field is constant
+    out_efield(iz_d+1:) = EF_values(iz_d+2)
   end subroutine EF_get_values
 
   real(dp) function EF_get_min_field()

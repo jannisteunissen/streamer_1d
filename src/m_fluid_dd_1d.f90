@@ -25,6 +25,7 @@ module m_fluid_dd_1d
    real(dp)              :: FL_small_dens
    real(dp)              :: FL_max_energy
    real(dp)              :: FL_pos_ion_mob, FL_pos_ion_diff
+   real(dp)              :: FL_max_E, FL_max_ne, FL_max_imp, FL_E_t_max, FL_ne_t_max, FL_imp_t_max
    real(dp), allocatable :: photo(:)
    real(dp)              :: photo_yield
 
@@ -41,8 +42,11 @@ module m_fluid_dd_1d
    public :: FL_get_coeffs
    public :: FL_max_edens_at_boundary
    public :: FL_surface_charge
+   public :: FL_max_E, FL_max_ne, FL_max_imp
+   public :: FL_E_t_max, FL_ne_t_max, FL_imp_t_max
    public :: photoi_initialize
    public :: photoi_set_src
+
 
 contains
 
@@ -196,6 +200,14 @@ contains
                  LT_get_col(FL_lkp_fld, FL_if_en, EF_get_at_pos((n-1)*PD_dx))
          end if
       end do
+      
+   
+      FL_max_E = 0.0_dp
+      FL_max_ne = 0.0_dp
+      FL_max_imp = 0.0_dp
+      FL_E_t_max = 0.0_dp
+      FL_ne_t_max = 0.0_dp
+      FL_imp_t_max = 0.0_dp
 
    end subroutine FL_init_cfg
 
@@ -367,6 +379,37 @@ contains
                     
      
    end subroutine add_s_charge
+   
+   subroutine global_result(E, ne, imp, time)
+      real(dp), intent(in) :: E, ne, imp, time
+      integer              :: i
+
+      if(E > FL_max_E) then 
+        FL_max_E = E
+        FL_E_t_max = 0.0_dp
+      end if
+
+      if(time > 1e-10_dp .and. E < FL_max_E .and. FL_E_t_max == 0.0_dp) FL_E_t_max = time 
+      
+      if(ne > FL_max_ne) then
+        FL_max_ne = ne
+        FL_ne_t_max = 0.0_dp
+      end if
+      if(time > 1e-10_dp .and. ne < FL_max_ne .and. FL_ne_t_max == 0.0_dp) FL_ne_t_max = time
+      
+      if(imp > FL_max_imp) then 
+        FL_max_imp = imp
+        FL_imp_t_max = 0.0_dp
+      end if
+      if(time > 1e-10_dp .and. imp < FL_max_imp .and. FL_imp_t_max == 0.0_dp) FL_imp_t_max = time
+      
+      do i = 1, 15 
+        if(time >= 2e-9_dp*(16-i) .and. time < 2.0015e-9_dp*(16-i)) then
+          write(*,*) FL_max_E, FL_max_ne, FL_max_imp, FL_E_t_max, FL_ne_t_max, FL_imp_t_max
+          exit
+        end if
+      end do
+   end subroutine global_result
 
    subroutine FL_advance(time, dt)
       use m_time_steppers
@@ -377,7 +420,8 @@ contains
       real(dp), intent(inout) :: time
       integer                 :: iz_d
       real(dp)                :: fld(PD_grid_size-1), mob_c(PD_grid_size-1), source(PD_grid_size)
-      type(LT_loc_t)          :: fld_locs(PD_grid_size-1)
+      type(LT_loc_t)          :: fld_locs(PD_grid_size-1), fld_locsc(PD_grid_size)
+      real(dp), dimension(PD_grid_size) :: vel, alpha, fldc
         
       iz_d = int(INIT_DI/PD_dx+1) 
 
@@ -394,16 +438,27 @@ contains
         
       FL_vars(iz_d+1:PD_grid_size, FL_iv_elec) = 0.0_dp
       FL_vars(iz_d+1:PD_grid_size, FL_iv_ion) = 0.0_dp
+      
+      
         
         
       call EF_compute_and_get_st(source, fld, FL_surface_charge)
       fld_locs = LT_get_loc(FL_lkp_fld, abs(fld))
       mob_c = LT_get_col_at_loc(FL_lkp_fld, FL_if_mob, fld_locs)
-      dt = min(0.6_dp * PD_dx / (epsilon(1.0_dp) + maxval(fld*mob_c)), &
-           0.5_dp * UC_eps0/(UC_elem_charge * maxval(mob_c * 0.5 * (FL_vars(1:PD_grid_size-1, FL_iv_elec) + &
+      dt = 0.7_dp * min(PD_dx / (epsilon(1.0_dp) + maxval(fld*mob_c)), &
+           UC_eps0/(UC_elem_charge * maxval(mob_c * 0.5 * (FL_vars(1:PD_grid_size-1, FL_iv_elec) + &
            FL_vars(2:PD_grid_size, FL_iv_elec)))))
 
-      if(dt > 1e-13) dt = 1e-13  
+      if(dt > 1e-13) dt = 1e-13
+      
+      call EF_compute_and_get((FL_vars(:, FL_iv_ion) - FL_vars(:, FL_iv_elec) - FL_vars(:, FL_iv_nion)) &
+           * UC_elem_charge, fldc, FL_surface_charge)   
+      fld_locsc = LT_get_loc(FL_lkp_fld, abs(fldc))
+      vel = LT_get_col_at_loc(FL_lkp_fld, FL_if_mob, fld_locsc) * abs(fldc)
+      alpha = LT_get_col_at_loc(FL_lkp_fld, FL_if_src, fld_locsc)     
+      
+      
+      call global_result(maxval(fld), maxval(FL_vars(:, FL_iv_elec)), maxval(vel*alpha * FL_vars(:, FL_iv_elec)), time) 
         
    end subroutine FL_advance
 

@@ -28,10 +28,10 @@
  grid_size = 3000
  
  # The relative permitivity of the dielectric:
- eps_DI = 1.0000E+02
+ eps_DI = 0.5000E+02
  
  # Photoemission yield for high energy photons:
- photo_yield = 1.0000E+00
+ photo_yield = 0.0000E+00
  
  # The relative position of the dielectric surface (extends to the right of the domain):
  init_DI_pos = 0.8000E+00

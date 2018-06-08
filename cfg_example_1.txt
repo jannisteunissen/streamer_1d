@@ -10,7 +10,7 @@
  sim_type = fluid_lfa
 
  # The desired endtime in seconds of the simulation:
- sim_end_time = 0.7000E-07
+ sim_end_time = 0.2000E-06
 
  # The initial/fixed timestep in seconds:
  sim_initial_dt = 1.0000E-13
@@ -19,7 +19,7 @@
  sim_max_dt = 0.3000E-12
 
  # Potential appled on the left (right end is grounded):
- pot_left = 0.3000E+04
+ pot_left = 0.5500E+04
 
  # The length of a grid cell:
  grid_dx = 0.1000E-05
@@ -28,10 +28,13 @@
  grid_size = 3000
  
  # The relative permitivity of the dielectric:
- eps_DI = 0.5000E+02
+ eps_DI = 1.0000E+03
  
  # Photoemission yield for high energy photons:
- photo_yield = 0.0000E+00
+ photo_yield = 1.0000E+00
+ 
+ # Work function of dielectric in eV:
+ work_fun = 5.0
  
  # The relative position of the dielectric surface (extends to the right of the domain):
  init_DI_pos = 0.8000E+00
@@ -43,10 +46,10 @@
  init_cond_name = gaussian
 
  # The relative position of the initial seed:
- init_rel_pos = 0.2500E+00
+ init_rel_pos = 0.3000E+00
 
  # The number of initial ion pairs:
- init_dens = 0.1000E+17
+ init_dens = 0.2000E+19
  
  # Positive ion mobility (m^2/(Vs)):
  pos_ion_mob = 0.1000E-03
@@ -164,7 +167,7 @@
  init_use_neg_ion = F
 
  # The standard deviation used for Gaussian initial profiles:
- init_width = 0.5000E-04
+ init_width = 0.1000E-03
 
  # The energy range over which to get the EEDF:
  output_eedf_eV_range = 0.0000E+00 0.5000E+02

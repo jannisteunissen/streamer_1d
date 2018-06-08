@@ -257,6 +257,8 @@ contains
          "Potential appled on the left (right end is grounded)")
     call CFG_add(cfg, "sim_constant_efield", .false., &
          "Whether the electric field is kept constant")
+    call CFG_add(cfg, "work_fun", 2.0_dp, &
+              "Work function of dielectric in eV")
 
     ! Initial conditions
     call CFG_add(cfg, "init_cond_name", "gaussian", &

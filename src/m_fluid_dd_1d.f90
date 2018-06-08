@@ -403,8 +403,8 @@ contains
       end if
       if(time > 1e-10_dp .and. imp < FL_max_imp .and. FL_imp_t_max == 0.0_dp) FL_imp_t_max = time
       
-      do i = 1, 15 
-        if(time >= 2e-9_dp*(16-i) .and. time < 2.0015e-9_dp*(16-i)) then
+      do i = 1, 55 
+        if(time >= 2e-9_dp*(56-i) .and. time < 2.0002e-9_dp*(56-i)) then
           write(*,*) FL_max_E, FL_max_ne, FL_max_imp, FL_E_t_max, FL_ne_t_max, FL_imp_t_max
           exit
         end if
@@ -540,8 +540,7 @@ contains
       pos_data(:,4) = FL_vars(:, FL_iv_ion)
 
       data_names(n_sca+5) = "net charge density (1/m3)"
-      pos_data(:,5) = (FL_vars(:, FL_iv_ion) - FL_vars(:, FL_iv_elec) - FL_vars(:, FL_iv_nion)) &
-           * UC_elem_charge
+      pos_data(:,5) = FL_vars(:, FL_iv_ion) - FL_vars(:, FL_iv_elec) - FL_vars(:, FL_iv_nion)
       
       data_names(n_sca+6) = "photo-elec density (1/(s m3))"
       pos_data(:,6) = photo(:)

@@ -12,6 +12,7 @@ module m_efield_1d
 
   integer, parameter :: dp = kind(0.0d0)
   real(dp)              :: pot_left ! potential 0 on the right
+  real(dp)              :: work_fun
   real(dp), allocatable :: EF_values(:)
   logical               :: EF_is_constant
   integer               :: iz_d
@@ -24,7 +25,9 @@ module m_efield_1d
   public :: EF_get_values
   public :: EF_get_values_st
   public :: EF_get_min_field
+  public :: field_emission
   public :: pot_left
+  public :: work_fun
 
 contains
 
@@ -34,6 +37,7 @@ contains
 
     call CFG_get(cfg, "pot_left", pot_left)
     call CFG_get(cfg, "sim_constant_efield", EF_is_constant)
+    call CFG_get(cfg, "work_fun", work_fun)
 
     ! The electric field is defined at cell faces, so it includes one extra point.
     ! e.g., if the charge density is defined at 0, dx, 2*dx, then the electric field is
@@ -147,5 +151,18 @@ contains
     real(dp), intent(out) :: out_efield(:)
     out_efield(:) = EF_values(2:PD_grid_size) ! Return only the interior points
   end subroutine EF_get_values_st
+  
+  real(dp) function field_emission(fld)
+  use m_units_constants
+    real(dp), intent(in) :: fld
+    real(dp)             :: W_ev, A, T
+    
+    W_ev = sqrt(UC_elem_charge * fld/(4*UC_pi*UC_eps0))
+    A = 120 * (1.0_dp/UC_elem_charge) * 10000
+    T = 270_dp
+    
+    field_emission = A * T**2 * exp(-UC_elem_charge*(work_fun-W_ev)/(UC_boltzmann_const*T))
+  end function field_emission
+  
 
 end module m_efield_1d

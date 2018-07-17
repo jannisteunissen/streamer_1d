@@ -6,11 +6,13 @@ ifeq ($(DEBUG), 1)
 	-g -ffpe-trap=invalid,zero,overflow
 endif
 
-OBJS	:= m_fluid_dd_1d.o m_output_1d.o m_particle_1d.o
+OBJS	:= m_fluid_dd_1d.o m_output_1d.o m_particle_1d.o m_config.o m_generic.o
 
-# INCDIRS	:= ../fosito ../particle_core ../fluid_core
-# LIBDIRS := ../fosito ../particle_core ../fluid_core
-# LIBS	:= particle_core fluid_core fosito
+INCDIRS	:= particle_core
+LIBDIRS := particle_core
+LIBS	:= particle_core
+
+VPATH := config_fortran
 
 %.o: 	%.f90
 	$(FC) -c -o $@ $< $(FFLAGS) $(addprefix -I,$(INCDIRS))
@@ -26,9 +28,8 @@ clean:
 	$(RM) *.o *.mod ../streamer_1d
 
 # Dependency information
-m_fluid_dd_1d.o: 	m_efield_1d.o m_init_cond_1d.o m_model_choice.o m_phys_domain.o
-m_efield_1d.o:		m_phys_domain.o
-m_output_1d.o: 		m_model_choice.o m_fluid_dd_1d.o m_particle_1d.o
-m_particle_1d.o: 	m_init_cond_1d.o m_efield_1d.o m_phys_domain.o
-m_init_cond_1d.o:	m_phys_domain.o
+m_fluid_dd_1d.o:	m_generic.o
+m_output_1d.o: 		m_fluid_dd_1d.o m_particle_1d.o
+m_particle_1d.o:	m_generic.o
+m_generic.o: m_units_constants.o m_config.o
 ../streamer_1d:		$(OBJS)

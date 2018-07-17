@@ -14,13 +14,11 @@
 
 
 program streamer_1d
-  use m_model_choice
   use m_config
-  use m_efield_1d
+  use m_generic
   use m_output_1d
   use m_fluid_dd_1d
   use m_particle_1d
-  use m_phys_domain
 
   implicit none
 

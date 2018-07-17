@@ -18,6 +18,9 @@ module m_generic
   real(dp), protected, public :: domain_dx     = 2e-6_dp
   real(dp), protected, public :: domain_inv_dx = 5e5_dp
 
+  !> The applied voltage
+  real(dp), protected :: applied_voltage = 1e3_dp
+
   !> Whether a dielectric is present on the left
   logical, protected, public :: left_dielectric_present = .false.
 
@@ -40,23 +43,30 @@ module m_generic
   integer, parameter :: init_block_type    = 2
 
   !> Type of initial condition (init_gaussian_type, init_block_type)
-  real(dp)            :: init_type
+  integer :: init_cond_type = init_gaussian_type
 
-  !> Initial condition location
-  real(dp)            :: init_location
+  !> Initial condition location (as coordinate)
+  real(dp)            :: init_location = 0.5e-3_dp
 
   !> Initial condition width
-  real(dp)            :: init_width
+  real(dp)            :: init_width = 1.0e-4_dp
 
   !> Initial condition charge type (1: positive ions, -1: electrons, 0: neutral)
-  real(dp)            :: init_charge_type
+  real(dp)            :: init_charge_type = 0
 
   !> Initial condition density
-  real(dp)            :: init_density
+  real(dp)            :: init_density = 1.0e9_dp
+
+  !> Initial condition density
+  real(dp)            :: init_energy = 1.0_dp
 
   public :: generic_initialize
   public :: compute_field
   public :: get_field_at
+
+  public :: init_pos_ion_dens
+  public :: init_elec_dens
+  public :: init_energy_dens
   ! public :: field_emission
   ! public :: pot_left
   ! public :: work_fun
@@ -65,15 +75,21 @@ contains
 
   subroutine generic_initialize(cfg)
     use m_config
-    type(CFG_t), intent(in) :: cfg
+    type(CFG_t), intent(inout) :: cfg
 
-    call CFG_add_get(cfg, "domain%length", domain_length)
-    call CFG_add_get(cfg, "domain%n_cell", domain_ncell)
+    character(len=40) :: init_type_name
+    character(len=40) :: model_type_name
+
+    call CFG_add_get(cfg, "domain%length", domain_length, &
+         "Length of the domain")
+    call CFG_add_get(cfg, "domain%n_cell", domain_ncell, &
+         "Number of cells in the domain")
 
     domain_dx        = domain_length / domain_ncell
-    domain_inv_dx    = 1/dx
+    domain_inv_dx    = 1/domain_dx
 
-    call CFG_add_get(cfg, "model_type", model_type_name)
+    call CFG_add_get(cfg, "model_type", model_type_name, &
+         "Type of model. Can be particle or fluid")
 
     select case (model_type_name)
     case ("part", "particle")
@@ -98,8 +114,10 @@ contains
     ! field_cc(1) is centered at x = 0.5 dx
     ! field_fc(1) is centered at x = 0.0 dx
 
-    call CFG_add_get(cfg, "left_dielectric_x", left_dielectric_x)
-    call CFG_add_get(cfg, "left_dielectric_eps", left_dielectric_eps)
+    call CFG_add_get(cfg, "left_dielectric_x", left_dielectric_x, &
+         "Interface position of left dielectric")
+    call CFG_add_get(cfg, "left_dielectric_eps", left_dielectric_eps, &
+         "Relative permittivity of left dielectric")
 
     left_dielectric_present = (&
          left_dielectric_x >= 0.0_dp .and. &
@@ -111,10 +129,11 @@ contains
        left_dielectric_x = (left_dielectric_iface-1) * domain_dx
     end if
 
-    call CFG_add_get(cfg, "init%type", init_type_name)
+    call CFG_add_get(cfg, "init%type", init_type_name, &
+         "Type of initial condition (block or gaussian)")
 
     select case (init_type_name)
-    case ("block"
+    case ("block")
        init_cond_type = init_block_type
     case ("gaussian", "Gaussian")
        init_cond_type = init_gaussian_type
@@ -125,8 +144,8 @@ contains
   subroutine compute_field(net_charge, left_surface_charge, time)
     use m_units_constants
     real(dp), intent(in) :: net_charge(:), left_surface_charge, time
-    real(dp)             :: conv_fac, E_corr_gas, E_corr_eps, E_corr_homog
-    real(dp)             :: pot_diff, dielectric_field
+    real(dp)             :: conv_fac, E_corr_gas, E_corr_eps
+    real(dp)             :: pot_diff, pot_correct
     integer              :: iz
 
     if (size(net_charge) /= domain_ncell) &
@@ -140,7 +159,8 @@ contains
 
     ! Note that on the dielectric boundary, the electric field is different on
     ! both sides, but we only store the value outside the dielectric for now.
-    field_fc(left_dielectric_iface) = left_surface_charge / (UC_eps0 * eps_DI)
+    field_fc(left_dielectric_iface) = left_surface_charge / &
+         (UC_eps0 * left_dielectric_eps)
 
     ! Handle the region outside the dielectric
     conv_fac = domain_dx / UC_eps0
@@ -157,8 +177,9 @@ contains
     pot_correct = pot_diff - get_potential(time)
 
     ! Correction in gas phase
-    E_corr_eps = pot_correct / (left_dielectric_x + (domain_length-left_dielectric_x) * eps_DI)
-    E_corr_gas = E_corr_eps * eps_DI
+    E_corr_eps = pot_correct / (left_dielectric_x + &
+         (domain_length-left_dielectric_x) * left_dielectric_eps)
+    E_corr_gas = E_corr_eps * left_dielectric_eps
     print *, pot_correct, E_corr_eps, E_corr_gas
 
     field_fc(1:left_dielectric_iface-1) = field_fc(1:left_dielectric_iface-1) + E_corr_eps
@@ -172,23 +193,32 @@ contains
     end do
   end subroutine compute_field
 
-  !> Get the electric field at a position in the domain (useful for the particle model)
-  real(dp) function get_field_at(pos)
-    real(dp), intent(in) :: pos
-    real(dp) :: Efield_pos, temp
-    integer :: lowIx
+  function get_potential(time) result(pot)
+    real(dp), intent(in) :: time
+    real(dp)             :: pot
 
-    error stop "TODO"
-    ! EF_values(1) is defined at -0.5 * domain_dx
-    lowIx = nint(pos * domain_inv_dx) + 1
-    lowIx = min(domain_ncell, max(1, lowIx))
+    pot = applied_voltage
+  end function get_potential
 
-    Efield_pos = (lowIx - 1.5_dp) * domain_dx
-    temp = (pos - Efield_pos) * domain_inv_dx
+  !> Get the electric field at a position in the domain (useful for the particle
+  !> model)
+  function get_field_at(x) result(field)
+    real(dp), intent(in) :: x
+    real(dp)             :: field, tmp
+    integer              :: low_ix
 
-    ! Do linear interpolation between lowIx and lowIx + 1 in the Efield array, given the position
-    EF_get_at_pos = (1.0_dp - temp) * EF_values(lowIx) + temp * EF_values(lowIx+1)
+    ! Do linear interpolation, note that field_fc(1) is defined at 0.0
+    tmp    = x * domain_inv_dx
+    low_ix = floor(tmp) + 1
+    ! Coefficient for upper point between 0 and 1
+    tmp    = low_ix - tmp
 
+    if (low_ix < 1 .or. low_ix > domain_ncell) then
+       print *, "get_field_at invalid position x = ", x
+       error stop
+    end if
+
+    field = (1.0_dp - tmp) * field_fc(low_ix) + tmp * field_fc(low_ix+1)
   end function get_field_at
 
   ! real(dp) function field_emission(fld)
@@ -208,23 +238,28 @@ contains
     real(dp)             :: dens
 
     if (x > left_dielectric_x) then
-       select case (init_type)
+       select case (init_cond_type)
        case (init_gaussian_type)
-          dens = init_dens * exp(-(x - init_location)**2 / (2 * init_width**2))
+          dens = init_density * &
+               exp(-(x - init_location)**2 / (2 * init_width**2))
        case (init_block_type)
-          if ((x - init_location) < init_width) dens = init_dens
+          if ((x - init_location) < init_width) then
+             dens = init_density
+          else
+             dens = 0.0_dp
+          end if
        case default
-          error stop "get_dens: wrong argument"
+          ! This should never occur, as input is checked before
+          dens = -huge(1.0_dp)
        end select
     end if
-  end subroutine get_dens
+  end function get_dens
 
   elemental function init_elec_dens(x) result(elec_dens)
     real(dp), intent(in) :: x
     real(dp)             :: elec_dens
-    type(LT_loc_t)       :: loc
 
-    if (init_seed_sign < 1) then
+    if (init_charge_type < 1) then
        elec_dens = get_dens(x)
     else
        elec_dens = 0.0_dp
@@ -234,9 +269,8 @@ contains
   elemental function init_pos_ion_dens(x) result(pos_ion_dens)
     real(dp), intent(in) :: x
     real(dp)             :: pos_ion_dens
-    type(LT_loc_t)       :: loc
 
-    if (init_seed_sign > -1) then
+    if (init_charge_type > -1) then
        pos_ion_dens = get_dens(x)
     else
        pos_ion_dens = 0.0_dp
@@ -246,9 +280,8 @@ contains
   elemental function init_energy_dens(x) result(energy_dens)
     real(dp), intent(in) :: x
     real(dp)             :: energy_dens
-    type(LT_loc_t)       :: loc
 
-    if (init_seed_sign < 1) then
+    if (init_charge_type < 1) then
        energy_dens = get_dens(x) * init_energy
     else
        energy_dens = 0.0_dp

@@ -87,7 +87,7 @@ module m_particle_core
      logical, allocatable         :: coll_is_event(:)
 
      !> Lookup table with collision rates
-     type(lookup_table_t)         :: rate_lt
+     type(LT_t)                   :: rate_lt
      real(dp)                     :: max_rate, inv_max_rate
 
      !> List of particles to be removed
@@ -732,12 +732,11 @@ contains
 
   integer function get_coll_index(rate_lt, n_colls, max_rate, &
        velocity, rand_unif)
-    use m_find_index
-    type(lookup_table_t), intent(in) :: rate_lt
-    real(dp), intent(IN)             :: velocity, rand_unif, max_rate
-    integer, intent(in)              :: n_colls
-    real(dp)                         :: rand_rate
-    real(dp)                         :: buffer(PC_max_num_coll)
+    type(LT_t), intent(in) :: rate_lt
+    real(dp), intent(IN)   :: velocity, rand_unif, max_rate
+    integer, intent(in)    :: n_colls
+    real(dp)               :: rand_rate
+    real(dp)               :: buffer(PC_max_num_coll)
 
     ! Fill an array with interpolated rates
     buffer(1:n_colls) = LT_get_mcol(rate_lt, velocity)
@@ -1658,7 +1657,7 @@ contains
 
     call self%get_colls(coll_data)
     n_coeffs = self%n_colls + 1
-    n_rows = LT_get_num_rows(self%rate_lt)
+    n_rows = self%rate_lt%n_points
     allocate(coeff_data(n_coeffs, n_rows))
     allocate(coeff_names(n_coeffs))
 

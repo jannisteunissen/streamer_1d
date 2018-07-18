@@ -13,7 +13,7 @@ module m_fluid_1d
   integer, parameter :: forward_euler    = 1
   integer, parameter :: rk2              = 2
   integer, parameter :: rk4              = 4
-  integer            :: time_step_method = forward_euler
+  integer            :: time_step_method = rk2
 
   integer            :: num_arrays
   integer            :: iv_elec, iv_pion, iv_en, iv_nion
@@ -204,9 +204,10 @@ contains
     call set_boundary_conditions(state)
 
     allocate(flux(1:nx+1))
-    ! allocate(mob_c(domain_ncell))
-    ! allocate(dif_c(domain_ncell))
-    ! allocate(src_c(domain_ncell))
+    allocate(mob_c(nx+1))
+    allocate(dif_c(nx+1))
+    allocate(src_c(nx+1))
+    allocate(fld_locs(nx+1))
     ! allocate(att_c(domain_ncell))
     ! allocate(det_c(domain_ncell))
 
@@ -216,7 +217,11 @@ contains
     call compute_field(source, -UC_elem_charge * state%s(i_lbound_elec), time)
 
     ! Get locations in the lookup table
-    fld_locs = LT_get_loc(fluid_lkp_fld, abs(field_fc))
+    fld_locs(:) = LT_get_loc(fluid_lkp_fld, abs(field_fc))
+    mob_c = LT_get_col_at_loc(fluid_lkp_fld, if_mob, fld_locs)
+    dif_c = 0.0_dp * LT_get_col_at_loc(fluid_lkp_fld, if_dif, fld_locs)
+    src_c = LT_get_col_at_loc(fluid_lkp_fld, if_src, fld_locs)
+
     ! if (fluid_use_en) then
     !    ! There is a regularization: at density zero, we use the energy corresponding to the efield
     !    fld_en = LT_get_col_at_loc(fluid_lkp_fld, if_en, fld_locs)
@@ -229,9 +234,6 @@ contains
     ! if (fluid_use_en_mob) then
     !    mob_c = LT_get_col_at_loc(fluid_lkp_en, fluid_ie_mob, en_locs)
     ! else
-    mob_c = LT_get_col_at_loc(fluid_lkp_fld, if_mob, fld_locs)
-    dif_c = LT_get_col_at_loc(fluid_lkp_fld, if_dif, fld_locs)
-    src_c = LT_get_col_at_loc(fluid_lkp_fld, if_src, fld_locs)
     ! end if
 
     ! if (fluid_use_en_dif) then
@@ -253,7 +255,13 @@ contains
          domain_dx, flux, domain_ncell, n_ghost_cells)
 
     ! ~~~ Ionization source ~~~ TODO: try different formulations
+    ! fld_locs(1:nx) = LT_get_loc(fluid_lkp_fld, abs(field_cc))
+    ! src_c(1:nx) = LT_get_col_at_loc(fluid_lkp_fld, if_src, fld_locs(1:nx))
+    ! mob_c(1:nx) = LT_get_col_at_loc(fluid_lkp_fld, if_mob, fld_locs(1:nx))
+
+    ! source = src_c(1:nx) * mob_c(1:nx) * abs(field_cc) * state%a(1:nx, iv_elec)
     call set_stagg_source_1d(source, src_c * abs(flux))
+
     derivs%a(1:nx, iv_elec) = source
     derivs%a(1:nx, iv_pion) = source
 
@@ -281,6 +289,7 @@ contains
        derivs%s(i_lbound_elec) = domain_dx * &
             derivs%a(left_dielectric_iface-1, iv_elec)
        derivs%a(left_dielectric_iface-1, iv_elec) = 0.0_dp
+       derivs%a(left_dielectric_iface-1, iv_pion) = 0.0_dp
     end if
 
     ! if (fluid_use_en) then

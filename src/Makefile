@@ -1,5 +1,5 @@
 FC 	:= gfortran
-FFLAGS	:= -Wall -O2 -fopenmp -Wno-unused -fcheck=all
+FFLAGS	:= -Wall -g -O2 -fopenmp -Wno-unused -fcheck=all -ffpe-trap=invalid,zero,overflow
 
 ifeq ($(DEBUG), 1)
 	FFLAGS += -fcheck=array-temps,bounds,do,mem,pointer\

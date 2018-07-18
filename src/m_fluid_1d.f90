@@ -11,7 +11,8 @@ module m_fluid_1d
   integer, parameter :: n_ghost_cells = 2
 
   integer, parameter :: forward_euler    = 1
-  integer, parameter :: rk2              = 2
+  integer, parameter :: trapezoidal      = 2
+  integer, parameter :: rk2              = 3
   integer, parameter :: rk4              = 4
   integer            :: time_step_method = rk2
 
@@ -55,6 +56,7 @@ contains
     real(dp)                   :: max_energy, max_efield, xx
     real(dp), allocatable      :: x_data(:), y_data(:)
     character(len=100)         :: data_name
+    character(len=40)          :: integrator
 
     input_file = "input/n2_transport_data_siglo.txt"
     call CFG_add_get(cfg, "fluid%input_file", input_file, &
@@ -69,6 +71,25 @@ contains
     max_efield = 2.5e7
     call CFG_add_get(cfg, "fluid%table_max_efield", max_efield, &
          "Maximum electric field in transport coefficient table")
+
+    integrator = "rk2"
+    call CFG_add_get(cfg, "fluid%integrator", integrator, &
+         "Time integrator (euler, trapezoidal, rk2, rk4)")
+
+    select case (integrator)
+    case ("euler")
+       time_step_method = forward_euler
+    case ("trapezoidal")
+       time_step_method = trapezoidal
+    case ("rk2")
+       time_step_method = rk2
+    case ("rk4")
+       time_step_method = rk4
+    case default
+       print *, "Unknown time integrator: ", trim(integrator)
+       error stop
+    end select
+
     ! call CFG_get(cfg, "fluid%small_density", fluid_small_dens, &
     !      "Small fluid density")
     ! fluid_max_energy = max_energy
@@ -430,10 +451,24 @@ contains
        call fluid_derivs(fluid_state, time, derivs)
        fluid_state%a = fluid_state%a + dt * derivs%a
        fluid_state%s = fluid_state%s + dt * derivs%s
-    case (rk2)
-       ! Step 1 (at initial time)
-       call fluid_derivs(fluid_state, time, derivs)
+    case (trapezoidal)
        substep = fluid_state
+
+       call fluid_derivs(substep, time, derivs)
+       substep%a = substep%a + dt * derivs%a
+       substep%s = substep%s + dt * derivs%s
+
+       call fluid_derivs(substep, time+dt, derivs)
+       substep%a = substep%a + dt * derivs%a
+       substep%s = substep%s + dt * derivs%s
+
+       fluid_state%a = 0.5_dp * (fluid_state%a + substep%a)
+       fluid_state%s = 0.5_dp * (fluid_state%s + substep%s)
+    case (rk2)
+       substep = fluid_state
+
+       ! Step 1 (at initial time)
+       call fluid_derivs(substep, time, derivs)
        substep%a = substep%a + 0.5_dp * dt * derivs%a
        substep%s = substep%s + 0.5_dp * dt * derivs%s
 
@@ -441,15 +476,16 @@ contains
        call fluid_derivs(substep, time + 0.5_dp * dt, derivs)
 
        ! Result (at initial time + dt)
-       fluid_state%a = fluid_state%a + 0.5_dp * dt * derivs%a
-       fluid_state%s = fluid_state%s + 0.5_dp * dt * derivs%s
+       fluid_state%a = fluid_state%a + dt * derivs%a
+       fluid_state%s = fluid_state%s + dt * derivs%s
     case (rk4)
+       substep = fluid_state
+
        ! Step 1 (at initial time)
-       call fluid_derivs(fluid_state, time, derivs)
+       call fluid_derivs(substep, time, derivs)
        sum_derivs = derivs
 
        ! Step 2 (at initial time + dt/2)
-       substep = fluid_state
        substep%a = substep%a + 0.5_dp * dt * derivs%a
        substep%s = substep%s + 0.5_dp * dt * derivs%s
        call fluid_derivs(substep, time + 0.5_dp * dt, derivs)
@@ -470,8 +506,8 @@ contains
        substep%s = fluid_state%s + dt * derivs%s
        call fluid_derivs(substep, time + dt, derivs)
 
-       sum_derivs%a = sum_derivs%a + 2 * derivs%a
-       sum_derivs%s = sum_derivs%s + 2 * derivs%s
+       sum_derivs%a = sum_derivs%a + derivs%a
+       sum_derivs%s = sum_derivs%s + derivs%s
 
        ! Combine time derivatives at steps
        fluid_state%a = fluid_state%a + dt * one_sixth * sum_derivs%a

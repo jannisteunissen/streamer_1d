@@ -1,12 +1,12 @@
 FC 	:= gfortran
-FFLAGS	:= -Wall -O2 -fopenmp
+FFLAGS	:= -Wall -O2 -fopenmp -Wno-unused -fcheck=all
 
 ifeq ($(DEBUG), 1)
 	FFLAGS += -fcheck=array-temps,bounds,do,mem,pointer\
 	-g -ffpe-trap=invalid,zero,overflow
 endif
 
-OBJS	:= m_fluid_dd_1d.o m_output_1d.o m_particle_1d.o m_config.o m_generic.o
+OBJS	:= m_fluid_1d.o m_config.o m_generic.o m_transport_data.o
 
 INCDIRS	:= particle_core
 LIBDIRS := particle_core
@@ -28,8 +28,7 @@ clean:
 	$(RM) *.o *.mod ../streamer_1d
 
 # Dependency information
-m_fluid_dd_1d.o:	m_generic.o
-m_output_1d.o: 		m_fluid_dd_1d.o m_particle_1d.o
+m_fluid_1d.o:	m_generic.o m_transport_data.o
 m_particle_1d.o:	m_generic.o
 m_generic.o: m_units_constants.o m_config.o
 ../streamer_1d:		$(OBJS)

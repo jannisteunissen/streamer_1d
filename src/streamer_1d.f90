@@ -16,193 +16,199 @@
 program streamer_1d
   use m_config
   use m_generic
-  use m_output_1d
-  use m_fluid_dd_1d
-  use m_particle_1d
+  use m_fluid_1d
+  ! use m_particle_1d
 
   implicit none
 
   integer, parameter   :: dp    = kind(0.0d0)
-  integer, parameter   :: s_len = 100
-  character(len=s_len) :: sim_name
+  integer, parameter   :: s_len = 200
+  character(len=s_len) :: output_name
 
-  integer              :: steps, n_steps_apm
-  integer              :: output_cntr
-  integer              :: info_cntr
-  integer              :: prev_apm_part
+  integer :: it, end_iteration
+  integer :: n_steps_apm
+  integer :: output_ix
+  integer :: info_cntr
+  integer :: prev_apm_part
 
   real(dp)             :: small_dens
-  real(dp)             :: sim_time, sim_end_time
-  real(dp)             :: dt, max_dt
-  real(dp)             :: output_dt, min_field
+  real(dp)             :: time, end_time
+  real(dp)             :: dt, dt_initial, dt_max, dt_min
+  real(dp)             :: dt_output, min_field
   real(dp)             :: time_now, time_start
   real(dp)             :: apm_increase
 
-  logical              :: do_apm
-  logical              :: stop_dens, stop_fld, stop_time, stop_sim
-  type(CFG_t)          :: cfg
+  logical     :: write_output
+  logical     :: do_apm
+  logical     :: stop_dens, stop_fld, stop_time, stop_sim
+  type(CFG_t) :: cfg
 
-  call initialize_all(cfg) ! Initialize all necessary modules
+  call CFG_update_from_arguments(cfg)
+
+  end_time = 3.0e-9_dp
+  call CFG_add_get(cfg, "end%time", end_time, "End time (s)")
+
+  end_iteration = huge(1)
+  call CFG_add_get(cfg, "end%iteration", end_iteration, "End iteration")
+
+  dt_initial = 1e-12_dp
+  call CFG_add_get(cfg, "dt%initial", dt_initial, "Initial time step (s)")
+
+  dt_max = 1e-11_dp
+  call CFG_add_get(cfg, "dt%max", dt_max, "Maximal time step (s)")
+
+  dt_min = 1e-13_dp
+  call CFG_add_get(cfg, "dt%min", dt_max, "Minimal time step (s)")
+
+  output_name = "output/my_sim"
+  call CFG_add_get(cfg, "output%filename", output_name, &
+       "Base file name for output")
+
+  dt_output = 1.0e-10_dp
+  call CFG_add_get(cfg, "output%interval", dt_output, &
+         "The time step for writing output")
+
+  print *, "Initialize generic"
+  call generic_initialize(cfg)
+  print *, "Initialize fluid"
+  call fluid_initialize(cfg)
+
+  call check_output_folder(trim(output_name))
+  call CFG_write(cfg, trim(output_name) // ".cfg", .true.)
 
   ! Initialize variables
-  prev_apm_part = PM_get_num_sim_part()
-  sim_time      = 0.0_dp
-  output_cntr   = 0
-  info_cntr     = 0
-  steps         = 0
-  stop_sim      = .false.
-  stop_dens     = .false.
-  min_field     = CFG_fget_real(cfg, "sim_min_field")
-  dt            = CFG_fget_real(cfg, "sim_initial_dt")
-  max_dt        = CFG_fget_real(cfg, "sim_max_dt")
-  output_dt     = CFG_fget_real(cfg, "output_interval")
-  sim_end_time  = CFG_fget_real(cfg, "sim_end_time")
-  n_steps_apm   = CFG_fget_int(cfg, "apm_steps_between")
-  small_dens    = CFG_fget_real(cfg, "fluid_small_density")
-  apm_increase  = CFG_fget_real(cfg, "apm_increase_factor")
+  ! prev_apm_part = PM_get_num_sim_part()
+  time        = 0.0_dp
+  output_ix = 0
+  info_cntr   = 0
+  it          = 0
+  stop_sim    = .false.
+  stop_dens   = .false.
 
-  call OUT_write_coeffs(sim_name)
+  ! call CFG_get(cfg, "apm_steps_between", n_steps_apm)
+  ! call CFG_get(cfg, "fluid_small_density", small_dens)
+  ! call CFG_get(cfg, "apm_increase_factor", apm_increase)
+
+  ! call OUT_write_coeffs(sim_name)
   call cpu_time(time_start)
 
   ! Here the simulation starts
-  do
-     call cpu_time(time_now)
-     if (time_now - time_start > 10 * info_cntr .or. stop_sim) then
-        if (MODEL_type == MODEL_part) then
-           print *, "Number of physical particles", PM_get_num_real_part()
-           write(*, "(I8,A,E8.2,A,E8.2,A,E8.2,A,E8.2)") steps, &
-                " -- t = ", sim_time, ", dt = ", dt, &
-                ", wct = ", time_now - time_start, &
-                ", n_part = ", real(PM_get_num_sim_part(), dp)
-        else
-           write(*, "(I8,A,E8.2,A,E8.2,A,E8.2)") steps, &
-                " -- t = ", sim_time, ", dt = ", dt, &
-                ", wct = ", time_now - time_start
+  do while (time < end_time .and. it < end_iteration .and. .not. stop_sim)
+     ! call cpu_time(time_now)
+     ! if (time_now - time_start > 10 * info_cntr .or. stop_sim) then
+     !    if (MODEL_type == MODEL_particle) then
+     !       ! print *, "Number of physical particles", PM_get_num_real_part()
+     !       ! write(*, "(I8,A,E8.2,A,E8.2,A,E8.2,A,E8.2)") it, &
+     !       !      " -- t = ", time, ", dt = ", dt, &
+     !       !      ", wct = ", time_now - time_start, &
+     !       !      ", n_part = ", real(PM_get_num_sim_part(), dp)
+     !    else
+     !       write(*, "(I8,A,E8.2,A,E8.2,A,E8.2)") it, &
+     !            " -- t = ", time, ", dt = ", dt, &
+     !            ", wct = ", time_now - time_start
+     !    end if
+     !    info_cntr = info_cntr + 1
+     ! end if
+
+     dt = dt_initial
+     write_output = (time + dt >= output_ix * dt_output .or. stop_sim)
+
+     if (write_output) then
+        dt          = output_ix * dt_output - time
+        output_ix = output_ix + 1
+     end if
+
+     if (model_type == model_fluid) then
+        call fluid_advance(time, dt)
+
+        if (write_output) then
+           call fluid_write_output(trim(output_name), time, output_ix)
         end if
-        info_cntr = info_cntr + 1
+     else
+        error stop
+        ! do_apm = (n_it_apm > 0 .and. mod(it, n_steps_apm) == 0) &
+        !      .or. PM_get_num_sim_part() > prev_apm_part * apm_increase
+        ! call PM_advance(dt, do_apm)
+        ! if (do_apm) prev_apm_part = PM_get_num_sim_part()
+
+        ! time = time + dt
+        ! stop_dens = (PM_max_edens_at_boundary() > small_dens)
      end if
 
-     if (sim_time >= output_cntr * output_dt .or. stop_sim) then
-        output_cntr = output_cntr + 1
-        call OUT_write_vars(sim_name, output_cntr, sim_time)
-     end if
-
-     if (stop_sim) exit ! Exit after output
-
-     select case (MODEL_type)
-     case (MODEL_part)
-        do_apm = (n_steps_apm > 0 .and. mod(steps, n_steps_apm) == 0) &
-             .or. PM_get_num_sim_part() > prev_apm_part * apm_increase
-        call PM_advance(dt, do_apm)
-        if (do_apm) prev_apm_part = PM_get_num_sim_part()
-
-        sim_time = sim_time + dt
-        stop_dens = (PM_max_edens_at_boundary() > small_dens)
-     case (MODEL_fluid_lfa, MODEL_fluid_ee)
-        call FL_advance(sim_time, dt)
-        stop_dens = (FL_max_edens_at_boundary() > small_dens)
-     end select
-
-     stop_fld  = EF_get_min_field() < min_field
-     stop_time = sim_time > sim_end_time
-
-     if (stop_dens) print *, "Stopping because discharge reached boundary"
-     if (stop_fld)  print *, "Stopping because field is getting too low"
-     if (stop_time) print *, "Stopping because end time was reached"
-     stop_sim = stop_dens .or. stop_fld .or. stop_time
-
-     steps = steps + 1
+     it = it + 1
+     time = time + dt
   end do
 
-  write(*, "(A,E10.4,A)") "Simulation ended after ", 1.0d9 * sim_time, " ns"
+  write(*, "(A,E10.4,A)") "Simulation ended after ", 1.0d9 * time, " ns"
 
 contains
 
   !> Initializes everything needed for the simulation
   subroutine initialize_all(cfg)
     use m_gas
-    use m_init_cond_1d
     use m_transport_data
     use m_cross_sec
 
     type(CFG_t), intent(inout)        :: cfg
-    integer                           :: ix
+    integer                           :: ix !
     integer                           :: nn, n_gas_comp
     integer                           :: n_cs_files
-    character(len=s_len)              :: MODEL_type_name
-    character(len=s_len)              :: cfg_name, tmp_name, prev_name
+    character(len=s_len)              :: model_type_name
     character(len=s_len), allocatable :: comp_names(:)
-    character(len=s_len), allocatable :: cs_files(:)
+    ! character(len=s_len), allocatable :: cs_files(:)
     real(dp), allocatable             :: comp_fracs(:)
-    type(CS_t), allocatable           :: cross_secs(:)
+    ! type(CS_t), allocatable           :: cross_secs(:)
+    real(dp)                          :: pressure, temperature
+    ! real(dp) :: max_ev
+    integer :: num_part, max_num_part
 
     call create_sim_config(cfg)      ! Create default parameters for the simulation
     call CFG_sort(cfg)
 
-    sim_name = ""
-    prev_name = ""
-    do ix = 1, command_argument_count()
-       call get_command_argument(ix, cfg_name)
-       call CFG_read_file(cfg, trim(cfg_name))
+    ! call CFG_write(cfg, "output/" // trim(sim_name) // "_config.txt")
 
-       call CFG_get(cfg, "sim_name", tmp_name)
-       if (sim_name == "") then
-          sim_name = tmp_name
-       else if (tmp_name /= "" .and. tmp_name /= prev_name) then
-          sim_name = trim(sim_name) // "_" // trim(tmp_name)
-       end if
-       prev_name = tmp_name
-    end do
-
-    call CFG_get(cfg, "sim_type", MODEL_type_name)
-    call CFG_write(cfg, "output/" // trim(sim_name) // "_config.txt")
-
-    call MODEL_initialize(MODEL_type_name)
-    call PD_set(CFG_fget_real(cfg, "grid_dx"), CFG_fget_int(cfg, "grid_size"))
-
-    n_gas_comp = CFG_fget_size(cfg, "gas_comp_names")
-    if (n_gas_comp /= CFG_fget_size(cfg, "gas_comp_fracs")) &
-         stop "streamer_1d: gas_comp_names/fracs have unequal size"
+    call CFG_get(cfg, "gas_comp_names", n_gas_comp)
+    call CFG_get_size(cfg, "gas_comp_fracs", nn)
+    if (n_gas_comp /= nn) &
+         error stop "streamer_1d: gas_comp_names/fracs have unequal size"
 
     allocate(comp_names(n_gas_comp))
     allocate(comp_fracs(n_gas_comp))
 
     call CFG_get(cfg, "gas_comp_names", comp_names)
     call CFG_get(cfg, "gas_comp_fracs", comp_fracs)
+    call CFG_get(cfg, "gas_pressure", pressure)
+    call CFG_get(cfg, "gas_temperature", temperature)
 
     ! Initialize gas and electric field module
-    call GAS_initialize(comp_names, comp_fracs, &
-         CFG_fget_real(cfg, "gas_pressure"), &
-         CFG_fget_real(cfg, "gas_temperature"))
-    call EF_initialize(cfg)
-    call INIT_init(cfg)
-    call OUT_init(cfg)
+    call GAS_initialize(comp_names, comp_fracs, pressure, temperature)
 
     select case (MODEL_type)
-    case (MODEL_part)
-       call CFG_get_size(cfg, "gas_cs_files", n_cs_files)
-       allocate(cs_files(n_cs_files))
-       call CFG_get(cfg, "gas_cs_files", cs_files)
-       if (n_cs_files /= n_gas_comp) then
-          print *, "streamer_1d: variables gas_cs_files and", &
-               " gas_component_fracs have unequal size"
-          stop
-       end if
+    ! case (MODEL_particle)
+    !    call CFG_get_size(cfg, "gas_cs_files", n_cs_files)
+    !    allocate(cs_files(n_cs_files))
+    !    call CFG_get(cfg, "gas_cs_files", cs_files)
+    !    if (n_cs_files /= n_gas_comp) then
+    !       print *, "streamer_1d: variables gas_cs_files and", &
+    !            " gas_component_fracs have unequal size"
+    !       stop
+    !    end if
 
-       do nn = 1, n_gas_comp
-          call CS_add_from_file("input/" // trim(cs_files(nn)), &
-               trim(GAS_comp_names(nn)), GAS_comp_fracs(nn) * GAS_number_dens, &
-               CFG_fget_real(cfg, "part_max_ev"), cross_secs)
-       end do
+    !    call CFG_get(cfg, "part_max_ev", max_ev)
+    !    do nn = 1, n_gas_comp
+    !       call CS_add_from_file("input/" // trim(cs_files(nn)), &
+    !            trim(GAS_comp_names(nn)), GAS_comp_fracs(nn) * GAS_number_dens, &
+    !            max_ev, cross_secs)
+    !    end do
 
-       call CS_write_summary(cross_secs, &
-            "output/" // trim(sim_name) // "_cs_summary.txt")
+    !    call CS_write_summary(cross_secs, &
+    !         "output/" // trim(sim_name) // "_cs_summary.txt")
 
-       call PM_initialize(cfg, cross_secs, CFG_fget_int(cfg, "init_num_part"), &
-            CFG_fget_int(cfg, "part_max_num"))
-
-    case (MODEL_fluid_lfa, MODEL_fluid_ee)
-       call FL_init_cfg(cfg)
+    !    call CFG_get(cfg, "init_num_part", num_part)
+    !    call CFG_get(cfg, "part_max_num", max_num_part)
+    !    call PM_initialize(cfg, cross_secs, num_part, max_num_part)
+    case (model_fluid)
+       call fluid_init_cfg(cfg)
     end select
 
   end subroutine initialize_all
@@ -212,18 +218,6 @@ contains
     type(CFG_t), intent(inout) :: cfg
 
     ! General simulation parameters
-    call CFG_add(cfg, "sim_type", "fluid_lfa", &
-         "The type of simulation to run: part, fluid_lfa, fluid_ee")
-    call CFG_add(cfg, "sim_end_time", 3.0D-9, &
-         "The desired endtime in seconds of the simulation")
-    call CFG_add(cfg, "sim_initial_dt", 3.0D-13, &
-         "The initial/fixed timestep in seconds")
-    call CFG_add(cfg, "sim_max_dt", 3.0D-13, &
-         "The maximal timestep in seconds")
-    call CFG_add(cfg, "sim_min_field", -1.0d99, &
-         "The minimum required electric field")
-    call CFG_add(cfg, "sim_name", "sim", &
-         "The name of the simulation")
 
     ! Grid parameters
     call CFG_add(cfg, "grid_size", 1000, &
@@ -270,10 +264,6 @@ contains
          "The background ion and electron density in 1/m^3")
 
     ! Output parameters
-    call CFG_add(cfg, "output_interval", 1.0D-10, &
-         "The timestep for writing output")
-    call CFG_add(cfg, "output_head_density", 2.0D18, &
-         "The density level tracked as streamer head")
     call CFG_add(cfg, "output_num_bins", 200, &
          "The number of bins to use for histograms")
     call CFG_add(cfg, "output_eedf_min_max_fields", &
@@ -348,4 +338,18 @@ contains
          "The name of the detachment rate coeff.")
   end subroutine create_sim_config
 
-end program streamer_1d
+  subroutine check_output_folder(filename)
+    character(len=*), intent(in) :: filename
+    integer                      :: my_unit, iostate
+
+    open(newunit=my_unit, file=trim(filename)//"DUMMY", iostat=iostate)
+
+    if (iostate /= 0) then
+       print *, "Output base file name: ", trim(filename)
+       error stop "Cannot write to output folder"
+    else
+       close(my_unit, status='delete')
+    end if
+  end subroutine check_output_folder
+
+end program

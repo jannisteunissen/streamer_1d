@@ -1,6 +1,6 @@
 module m_particle_1d
+  use m_generic
   use m_particle_core
-  use m_phys_domain
 
   implicit none
   private
@@ -18,7 +18,7 @@ module m_particle_1d
 
   ! Public routines
   public :: PM_initialize
-  public :: PM_advance
+  ! public :: PM_advance
   public :: PM_get_output
   public :: PM_get_eedf
   public :: PM_max_edens_at_boundary
@@ -31,11 +31,10 @@ contains
   subroutine PM_initialize(cfg, cross_secs, n_part_init, n_part_max)
     use m_config
     use m_random
-    use m_init_cond_1d
     use m_units_constants
     use m_cross_sec
-    
-    type(CFG_t), intent(in)   :: cfg
+
+    type(CFG_t), intent(inout)   :: cfg
     type(CS_t), intent(in)    :: cross_secs(:)
     integer, intent(in)       :: n_part_init, n_part_max
 
@@ -45,8 +44,8 @@ contains
     real(dp) :: pos(3), vel(3), accel(3), max_ev
 
     sum_elec_dens = 0.0_dp
-    do n = 1, PD_grid_size
-       call INIT_get_elec_dens((n-1) * PD_dx, elec_dens)
+    do n = 1, domain_ncell
+       call INIT_get_elec_dens((n-1) * domain_dx, elec_dens)
        sum_elec_dens = sum_elec_dens + elec_dens
     end do
 
@@ -56,22 +55,22 @@ contains
          stop "Initial electron density seems to be zero!"
 
     PM_grid_volume     = n_part_init / sum_elec_dens
-    PM_transverse_area = PM_grid_volume / PD_dx
+    PM_transverse_area = PM_grid_volume / domain_dx
     PM_inv_grid_volume = 1 / PM_grid_volume
     call CFG_get(cfg, "apm_part_per_cell", PM_part_per_cell)
     call CFG_get(cfg, "apm_vel_rel_weight", PM_vel_rel_weight)
 
-    allocate(PM_vars(PD_grid_size, PM_num_vars))
+    allocate(PM_vars(domain_ncell, PM_num_vars))
     PM_vars = 0.0_dp
 
     call CFG_get(cfg, "part_lkptbl_size", tbl_size)
     call CFG_get(cfg, "part_max_ev", max_ev)
     call pc%initialize(UC_elec_mass, cross_secs, tbl_size, max_ev, n_part_max)
-    call pc%set_coll_callback(coll_callback)
+    ! call pc%set_coll_callback(coll_callback)
 
     ! Initialization of electron and ion density
-    do n = 1, PD_grid_size
-       xx = (n-1) * PD_dx
+    do n = 1, domain_ncell
+       xx = (n-1) * domain_dx
        call INIT_get_elec_dens(xx, elec_dens)
        call INIT_get_ion_dens(xx, ion_dens)
        call INIT_get_en_dens(xx, en_dens)
@@ -98,13 +97,13 @@ contains
 
     call set_elec_density()
     call PM_update_efield()
-    call pc%correct_new_accel(0.0_dp, accel_func)
+    ! call pc%correct_new_accel(0.0_dp, accel_func)
 
   end subroutine PM_initialize
 
   real(dp) function PM_max_edens_at_boundary()
     PM_max_edens_at_boundary = &
-         max(PM_vars(1, PM_iv_elec), PM_vars(PD_grid_size, PM_iv_elec))
+         max(PM_vars(1, PM_iv_elec), PM_vars(domain_ncell, PM_iv_elec))
   end function PM_max_edens_at_boundary
 
   subroutine set_elec_density()
@@ -125,13 +124,13 @@ contains
     real(dp)                :: temp, weight, dens_dif
 
     ! Index i is at (i-1) * dx
-    temp   = zz * PD_inv_dx
+    temp   = zz * domain_inv_dx
     low_ix = floor(temp) + 1
     weight = low_ix - temp
 
     dens_dif = amount * PM_inv_grid_volume
 
-    if (low_ix < 1 .or. low_ix > PD_grid_size-1) then
+    if (low_ix < 1 .or. low_ix > domain_ncell-1) then
        print *, "Particle module: a particle is outside the computational domain"
        stop
     end if
@@ -147,7 +146,7 @@ contains
     real(dp)                :: temp, weight
 
     ! Index i is at (i-1) * dx
-    temp   = zz * PD_inv_dx
+    temp   = zz * domain_inv_dx
     low_ix = floor(temp) + 1
     weight = low_ix - temp
     get_from_dens_lin_interp = dens(low_ix) * weight + dens(low_ix+1) * (1-weight)
@@ -189,13 +188,11 @@ contains
   end subroutine coll_callback
 
   subroutine PM_update_efield()
-    use m_efield_1d
     use m_units_constants
     call EF_compute((PM_vars(:, PM_iv_ion) - PM_vars(:, PM_iv_elec)) * UC_elem_charge)
   end subroutine PM_update_efield
 
   function accel_func(my_part) result(accel)
-    use m_efield_1d
     use m_units_constants
     type(PC_part_t), intent(in) :: my_part
     real(dp)                    :: accel(3)
@@ -203,33 +200,33 @@ contains
 
     ! Only acceleration in the z-direction
     accel(1:2) = 0.0_dp
-    accel(3) = accel_fac * EF_get_at_pos(my_part%x(3))
+    accel(3) = accel_fac * get_field_at(my_part%x(3))
   end function accel_func
 
-  subroutine PM_advance(dt, do_apm)
-    real(dp), intent(in)   :: dt
-    logical, intent(in)    :: do_apm
+  ! subroutine PM_advance(dt, do_apm)
+  !   real(dp), intent(in)   :: dt
+  !   logical, intent(in)    :: do_apm
 
-    call pc%advance(dt)
-    call set_elec_density()
-    call PM_update_efield()
-    call pc%correct_new_accel(dt, accel_func)
-    if (do_apm) call PM_adapt_weights()
-  end subroutine PM_advance
+  !   call pc%advance(dt)
+  !   call set_elec_density()
+  !   call PM_update_efield()
+  !   ! call pc%correct_new_accel(dt, accel_func)
+  !   if (do_apm) call PM_adapt_weights()
+  ! end subroutine PM_advance
 
-  subroutine PM_adapt_weights()
-    real(dp) :: v_fac
-    v_fac = PM_vel_rel_weight * PD_dx / PM_part_per_cell
+  ! subroutine PM_adapt_weights()
+  !   real(dp) :: v_fac
+  !   v_fac = PM_vel_rel_weight * domain_dx / PM_part_per_cell
 
-    call pc%merge_and_split((/.false., .false., .true./), v_fac, .false., &
-         get_desired_weight, PC_merge_part_rxv, PC_split_part)
-    call set_elec_density()
-    call PM_update_efield()
-    call pc%set_accel(accel_func)
+  !   call pc%merge_and_split((/.false., .false., .true./), v_fac, .false., &
+  !        get_desired_weight, PC_merge_part_rxv, PC_split_part)
+  !   call set_elec_density()
+  !   call PM_update_efield()
+  !   call pc%set_accel(accel_func)
 
-    ! write(*,'(A, E12.4, A, I0)') " After merging real/sim part: ", &
-         ! pc%get_num_real_part(), " / ", pc%get_num_sim_part()
-  end subroutine PM_adapt_weights
+  !   ! write(*,'(A, E12.4, A, I0)') " After merging real/sim part: ", &
+  !        ! pc%get_num_real_part(), " / ", pc%get_num_sim_part()
+  ! end subroutine PM_adapt_weights
 
   real(dp) function get_desired_weight(my_part)
     type(PC_part_t), intent(in) :: my_part
@@ -249,23 +246,22 @@ contains
 
   subroutine PM_get_output(pos_data, sca_data, data_names, &
        n_pos, n_sca, time, head_density)
-    use m_efield_1d
     use m_units_constants
     real(dp), intent(out), allocatable         :: pos_data(:,:), sca_data(:)
     real(dp), intent(in)                       :: time, head_density
     character(len=*), intent(out), allocatable :: data_names(:)
     integer, intent(out)                       :: n_pos, n_sca
     integer                                    :: n, ix
-    real(dp)                                   :: temp_data(PD_grid_size)
+    real(dp)                                   :: temp_data(domain_ncell)
 
     n_pos = 6
     n_sca = 2
-    allocate(pos_data(PD_grid_size, n_pos))
+    allocate(pos_data(domain_ncell, n_pos))
     allocate(sca_data(n_sca))
     allocate(data_names(n_pos+n_sca))
 
-    do n = 1, PD_grid_size
-       temp_data(n) = (n-1) * PD_dx
+    do n = 1, domain_ncell
+       temp_data(n) = (n-1) * domain_dx
     end do
 
     data_names(n_sca+1) = "position (m)"
@@ -289,14 +285,14 @@ contains
 
     ix = -1
     if (pos_data(1,2) > 0) then ! Check sign of electric field
-       do n = 2, PD_grid_size
+       do n = 2, domain_ncell
           if (pos_data(n, 3) > head_density) then
              ix = n
              exit
           end if
        end do
     else
-       do n = PD_grid_size, 2, -1
+       do n = domain_ncell, 2, -1
           if (pos_data(n-1, 3) > head_density) then
              ix = n
              exit
@@ -310,7 +306,7 @@ contains
        ! Interpolate between points ix-1 and ix
        sca_data(2) = (head_density - pos_data(ix-1, 3)) / &
             (pos_data(ix, 3) - pos_data(ix-1, 3))
-       sca_data(2) = (ix - 2 + sca_data(2)) * PD_dx
+       sca_data(2) = (ix - 2 + sca_data(2)) * domain_dx
     end if
 
     data_names(n_sca+4) = "ion density (1/m3)"

@@ -1,5 +1,5 @@
 module m_output_1d
-  use m_model_choice
+  use m_generic
 
   implicit none
   private
@@ -18,7 +18,7 @@ contains
 
   subroutine OUT_init(cfg)
     use m_config
-    type(CFG_t), intent(in) :: cfg
+    type(CFG_t), intent(inout) :: cfg
 
     call CFG_get(cfg, "output_head_density", OUT_head_density)
     call CFG_get(cfg, "output_num_bins", OUT_num_bins)
@@ -30,7 +30,7 @@ contains
   end subroutine OUT_init
 
   subroutine OUT_write_vars(sim_name, cntr, time)
-    use m_fluid_dd_1d, only: FL_get_output
+    use m_fluid_dd_1d, only: fluid_get_output
     use m_particle_1d, only: PM_get_output, PM_get_eedf
 
     character(len=*), intent(in)   :: sim_name
@@ -43,8 +43,8 @@ contains
     real(dp), allocatable          :: pos_data(:,:), eedf(:,:), sca_data(:)
     character(len=20), allocatable :: data_names(:)
 
-    select case (MODEL_type)
-    case (MODEL_part)
+    select case (model_type)
+    case (model_particle)
        write(filename, fmt="(A,I0,A)"), &
             "output/" // trim(sim_name) // "_p_", cntr, ".txt"
 
@@ -74,10 +74,10 @@ contains
           deallocate(eedf)
        end do
 
-    case (MODEL_fluid_lfa)
+    case (model_fluid_lfa)
        write(filename, fmt="(A,I0,A)") &
             "output/" // trim(sim_name) // "_fl_", cntr, ".txt"
-       call FL_get_output(pos_data, sca_data, data_names, &
+       call fluid_get_output(pos_data, sca_data, data_names, &
             n_pos, n_sca, time, OUT_head_density)
 
        if (n_sca > 0) then
@@ -90,10 +90,10 @@ contains
                data_names(n_sca+1:n_sca+n_pos), 30)
        end if
 
-    case (MODEL_fluid_ee)
+    case (model_fluid_ee)
        write(filename, fmt="(A,I0,A)") &
             "output/" // trim(sim_name) // "_flee_", cntr, ".txt"
-       call FL_get_output(pos_data, sca_data, data_names, &
+       call fluid_get_output(pos_data, sca_data, data_names, &
             n_pos, n_sca, time, OUT_head_density)
 
        if (n_sca > 0) then
@@ -113,7 +113,7 @@ contains
 
   subroutine OUT_write_coeffs(sim_name)
     use m_particle_1d, only: PM_get_coeffs
-    use m_fluid_dd_1d, only: FL_get_coeffs
+    use m_fluid_dd_1d, only: fluid_get_coeffs
 
     character(len=*), intent(in)   :: sim_name
 
@@ -123,8 +123,8 @@ contains
     real(dp), allocatable          :: coeff_data(:,:)
     character(len=20), allocatable :: coeff_names(:)
 
-    select case (MODEL_type)
-    case (MODEL_part)
+    select case (model_type)
+    case (model_particle)
        filename = "output/" // trim(sim_name) // "_p_coeffs.txt"
        call PM_get_coeffs(coeff_data, coeff_names, n_coeffs)
 
@@ -132,17 +132,17 @@ contains
           call write_data_2d(filename, coeff_data, &
                coeff_names, 30, do_transpose = .true.)
        end if
-    case (MODEL_fluid_lfa)
+    case (model_fluid_lfa)
        filename = "output/" // trim(sim_name) // "_fl_coeffs.txt"
-       call FL_get_coeffs(coeff_data, coeff_names, n_coeffs)
+       call fluid_get_coeffs(coeff_data, coeff_names, n_coeffs)
 
        if (n_coeffs > 0) then
           call write_data_2d(filename, coeff_data, &
                coeff_names, 30, do_transpose = .true.)
        end if
-    case (MODEL_fluid_ee)
+    case (model_fluid_ee)
        filename = "output/" // trim(sim_name) // "_flee_coeffs.txt"
-       call FL_get_coeffs(coeff_data, coeff_names, n_coeffs)
+       call fluid_get_coeffs(coeff_data, coeff_names, n_coeffs)
 
        if (n_coeffs > 0) then
           call write_data_2d(filename, coeff_data, &
@@ -171,16 +171,16 @@ contains
   end subroutine write_line
 
   subroutine write_data_2d(filename, data_2d, col_names, col_width, do_transpose)
-    character(len=*), intent(in)        :: filename
-    real(dp), intent(in)                :: data_2d(:,:)
-    integer, intent(in)                 :: col_width
-    character(len=*), intent(in) :: col_names(:)
-    logical, intent(in), optional       :: do_transpose
+    character(len=*), intent(in)  :: filename
+    real(dp), intent(in)          :: data_2d(:,:)
+    integer, intent(in)           :: col_width
+    character(len=*), intent(in)  :: col_names(:)
+    logical, intent(in), optional :: do_transpose
 
-    integer                             :: my_unit, n, n_rows, n_cols, io_state
-    character(len=20)             :: fmt_string
-    real(dp), allocatable               :: copy_of_data(:,:)
-    logical                             :: transpose_data
+    integer               :: my_unit, n, n_rows, n_cols, io_state
+    character(len=20)     :: fmt_string
+    real(dp), allocatable :: copy_of_data(:,:)
+    logical               :: transpose_data
 
     my_unit = 333
     if (present(do_transpose)) then

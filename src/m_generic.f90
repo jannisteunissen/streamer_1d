@@ -13,12 +13,12 @@ module m_generic
   integer, protected, public :: model_type     = 1
 
   real(dp), protected, public :: domain_length = 2.0e-3_dp
-  integer, protected, public  :: domain_nx  = 500
+  integer, protected, public  :: domain_nx     = 500
   real(dp), protected, public :: domain_dx     = 2e-6_dp
   real(dp), protected, public :: domain_inv_dx = 5e5_dp
 
   !> The applied voltage
-  real(dp), protected :: applied_voltage = 1e3_dp
+  real(dp), protected :: applied_voltage = -1e4_dp
 
   !> Whether a dielectric is present on the left and right
   logical, protected, public :: dielectric_present(2)
@@ -65,6 +65,9 @@ module m_generic
   !> Gas temperature in Kelvin
   real(dp), protected, public :: gas_temperature = 300.0_dp
 
+  !> Gas number density in m^-3
+  real(dp), protected, public :: gas_number_dens
+
   public :: generic_initialize
   public :: compute_field
   public :: get_field_at
@@ -80,11 +83,11 @@ contains
 
   subroutine generic_initialize(cfg)
     use m_config
+    use m_units_constants
     type(CFG_t), intent(inout) :: cfg
 
     character(len=40) :: init_type_name
-    character(len=40) :: model_type_name
-    character(len=40) :: dielectric_side
+    character(len=40) :: model_name
 
     call CFG_add_get(cfg, "gas%name", gas_name, &
          "Name of gas mixture")
@@ -92,6 +95,9 @@ contains
          "Gas pressure in bar")
     call CFG_add_get(cfg, "gas%temperature", gas_temperature, &
          "Gas temperature in Kelvin")
+
+    gas_number_dens = 1.0e5_dp * gas_pressure / &
+         (UC_boltzmann_const * gas_temperature)
 
     call CFG_add_get(cfg, "domain%length", domain_length, &
          "Length of the domain")
@@ -101,17 +107,17 @@ contains
     domain_dx        = domain_length / domain_nx
     domain_inv_dx    = 1/domain_dx
 
-    model_type_name = "fluid"
-    call CFG_add_get(cfg, "model_type", model_type_name, &
+    model_name = "fluid"
+    call CFG_add_get(cfg, "model", model_name, &
          "Type of model. Can be particle or fluid")
 
-    select case (model_type_name)
+    select case (model_name)
     case ("part", "particle")
        model_type = model_particle
     case ("fluid")
        model_type = model_fluid
     case default
-       print *, "Invalid simulation type given: ", MODEL_type_name
+       print *, "Invalid simulation type given: ", model_name
        print *, "Supported are: particle, fluid"
        error stop
     end select
@@ -155,7 +161,7 @@ contains
     real(dp), intent(in) :: net_charge(:)
     real(dp), intent(in) :: surface_charge(2)
     real(dp), intent(in) :: time
-    real(dp)             :: conv_fac, E_corr_gas, E_corr_eps
+    real(dp)             :: conv_fac, E_corr_gas
     real(dp)             :: pot_diff, pot_correct
     integer              :: n
 

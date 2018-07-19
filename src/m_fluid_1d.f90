@@ -54,7 +54,7 @@ contains
     integer, parameter         :: name_len = 100
     character(len=200)         :: input_file
     integer                    :: n, table_size
-    real(dp)                   :: max_energy, max_efield, xx
+    real(dp)                   :: max_efield, xx
     real(dp), allocatable      :: x_data(:), y_data(:)
     character(len=100)         :: data_name
     character(len=40)          :: integrator
@@ -66,8 +66,6 @@ contains
     table_size = 1000
     call CFG_add_get(cfg, "fluid%table_size", table_size, &
          "Size of lookup table for transport coefficients")
-
-    ! call CFG_get(cfg, "fluid_lkptbl_max_energy", max_energy)
 
     max_efield = 2.5e7
     call CFG_add_get(cfg, "fluid%table_max_efield", max_efield, &
@@ -247,7 +245,7 @@ contains
     ! Get electric field
     source = UC_elem_charge * (state%a(1:nx, iv_pion) - state%a(1:nx, iv_elec) &
          - state%a(1:nx, iv_nion))
-    surface_charge(:) = -UC_elem_charge * state%s([i_lbound_elec, i_rbound_elec])
+    surface_charge = -UC_elem_charge * state%s([i_lbound_elec, i_rbound_elec])
     call compute_field(source, surface_charge, time)
 
     ! Get locations in the lookup table
@@ -322,28 +320,6 @@ contains
     derivs%s(i_lbound_elec) = -flux(1)
     derivs%s(i_rbound_elec) = flux(domain_nx+1)
 
-    ! if (fluid_use_en) then
-    !    ! ~~~ Energy source ~~~
-    !    source(n_cc)     = 0.0_dp
-    !    source(1:n_cc-1) = -0.5_dp * (fld * flux + en_loss * state%a(1:n_cc-1, iv_elec))
-    !    source(2:n_cc)   = source(2:n_cc) - 0.5_dp * (fld * flux + en_loss * &
-    !         state%a(2:n_cc, iv_elec))
-
-    !    ! ~~~ energy transport ~~~
-    !    call fluid_transport_scheme(state%a(:, iv_en), -five_third * mob_c * fld, &
-    !         five_third * dif_c * inv_delta_x, flux)
-
-    !    ! Set time derivatives
-    !    time_derivs(:, iv_en) = source
-    !    call add_grad_flux_1d(time_derivs(:, iv_en), flux * inv_delta_x)
-    ! end if
-
-    ! Dirichlet
-    ! time_derivs(1, :) = 0.0_dp
-    ! time_derivs(n_cc, :) = 0.0_dp
-    ! Neumann
-    ! time_derivs(1, :) = time_derivs(2, :)
-    ! time_derivs(n_cc, :) = time_derivs(n_cc-1, :)
   end subroutine fluid_derivs
 
   subroutine set_stagg_source_1d(dens_c, src_f)
@@ -363,25 +339,19 @@ contains
     integer, intent(in)          :: ix
     integer                      :: n, nx
     character(len=200)           :: fname
-    real(dp)                     :: total_charge, elec_free, elec_bound
+    real(dp)                     :: total_charge
     integer                      :: my_unit
 
     nx = domain_nx
-    total_charge = domain_dx * sum(fluid_state%a(1:nx, iv_pion) &
-         - fluid_state%a(1:nx, iv_elec)) &
-         - fluid_state%s(i_lbound_elec)
-    ! elec_free = sum(fluid_state%a(1:nx, iv_elec)) * domain_dx
-    ! elec_bound = fluid_state%s(i_lbound_elec)
-    ! print *, "Q", elec_free, elec_bound, total_charge
 
     write(fname, "(A,A,I0.6,A)") trim(base_fname), "_fluid_", ix, ".txt"
     open(newunit=my_unit, file=trim(fname))
 
     do n = 1, domain_nx
        write(my_unit, *) domain_dx * (n-0.5_dp), &
+            field_cc(n), &
             fluid_state%a(n, iv_elec), &
-            fluid_state%a(n, iv_pion), &
-            field_cc(n)
+            fluid_state%a(n, iv_pion)
     end do
     close(my_unit)
 
@@ -395,7 +365,13 @@ contains
        open(newunit=my_unit, file=trim(fname), access='append')
     end if
 
-    write(my_unit, *) time, fluid_state%s(i_lbound_elec), total_charge
+    total_charge = domain_dx * sum(fluid_state%a(1:nx, iv_pion) &
+         - fluid_state%a(1:nx, iv_elec)) &
+         - fluid_state%s(i_lbound_elec) &
+         - fluid_state%s(i_rbound_elec)
+
+    write(my_unit, *) time, fluid_state%s(i_lbound_elec), &
+         fluid_state%s(i_rbound_elec), total_charge
     close(my_unit)
   end subroutine fluid_write_output
 
@@ -443,9 +419,9 @@ contains
 
   ! end subroutine fluid_get_coeffs
 
-  subroutine fluid_advance(time, dt)
-    real(dp), intent(in) :: time
+  subroutine fluid_advance(dt, time)
     real(dp), intent(in) :: dt
+    real(dp), intent(in) :: time
     real(dp), parameter  :: one_sixth = 1 / 6.0_dp
 
     type(state_t) :: derivs

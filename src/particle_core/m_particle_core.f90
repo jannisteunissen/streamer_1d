@@ -43,7 +43,7 @@ module m_particle_core
 
   !> Integer indicating the 'collision type' of events in which particles went
   !> outside the domain
-  integer, parameter :: PC_particle_went_out = -1
+  integer, parameter, public :: PC_particle_went_out = -1
 
   !> The particle type
   type, public :: PC_part_t

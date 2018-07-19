@@ -19,8 +19,9 @@ module m_fluid_1d
   integer            :: num_arrays
   integer            :: iv_elec, iv_pion, iv_en, iv_nion
 
-  integer, parameter :: num_scalars = 1
+  integer, parameter :: num_scalars = 2
   integer, parameter :: i_lbound_elec = 1
+  integer, parameter :: i_rbound_elec = 2
 
   integer :: if_mob, if_dif, if_src, if_en
   integer :: if_att, if_det, fluid_num_fld_coef
@@ -119,7 +120,7 @@ contains
     ! end if
 
     n = n_ghost_cells
-    allocate(fluid_state%a(1-n:domain_ncell+n, num_arrays))
+    allocate(fluid_state%a(1-n:domain_nx+n, num_arrays))
     allocate(fluid_state%s(num_scalars))
 
     fluid_state%a(:, :) = 0.0_dp
@@ -184,7 +185,7 @@ contains
     fluid_num_en_coef  = fluid_lkp_en%n_cols
 
     ! Initialization of electron and ion density
-    do n = 1, domain_ncell
+    do n = 1, domain_nx
        xx = (n-1) * domain_dx
        fluid_state%a(n, iv_elec) = init_elec_dens(xx)
        fluid_state%a(n, iv_pion) = init_pos_ion_dens(xx)
@@ -196,15 +197,25 @@ contains
   subroutine set_boundary_conditions(state)
     type(state_t), intent(inout) :: state
 
-    ! Neumann boundary condition on the right
-    state%a(domain_ncell+1, iv_elec) = state%a(domain_ncell, iv_elec)
-    state%a(domain_ncell+2, iv_elec) = state%a(domain_ncell-1, iv_elec)
-
-    if (.not. left_dielectric_present) then
+    if (dielectric_present(1)) then
+       ! Inside dielectric, density is zero
+       state%a(0, iv_elec) = 0.0_dp
+       state%a(-1, iv_elec) = 0.0_dp
+    else
        ! Neumann boundary condition on the left
        state%a(0, iv_elec) = state%a(1, iv_elec)
        state%a(-1, iv_elec) = state%a(2, iv_elec)
     end if
+
+    if (dielectric_present(2)) then
+       state%a(domain_nx+1, iv_elec) = 0.0_dp
+       state%a(domain_nx+2, iv_elec) = 0.0_dp
+    else
+       ! Neumann boundary condition on the right
+       state%a(domain_nx+1, iv_elec) = state%a(domain_nx, iv_elec)
+       state%a(domain_nx+2, iv_elec) = state%a(domain_nx-1, iv_elec)
+    end if
+
   end subroutine set_boundary_conditions
 
   subroutine fluid_derivs(state, time, derivs)
@@ -214,13 +225,14 @@ contains
     type(state_t), intent(inout) :: derivs
 
     integer                     :: n, nx
+    real(dp)                    :: surface_charge(2)
     real(dp), parameter         :: five_third = 5 / 3.0_dp
     real(dp), allocatable       :: mob_c(:), dif_c(:), src_c(:)
     real(dp), allocatable       :: flux(:)
     real(dp), allocatable       :: source(:)
     type(LT_loc_t), allocatable :: fld_locs(:)
 
-    nx = domain_ncell
+    nx = domain_nx
 
     call set_boundary_conditions(state)
 
@@ -229,13 +241,14 @@ contains
     allocate(dif_c(nx+1))
     allocate(src_c(nx+1))
     allocate(fld_locs(nx+1))
-    ! allocate(att_c(domain_ncell))
-    ! allocate(det_c(domain_ncell))
+    ! allocate(att_c(domain_nx))
+    ! allocate(det_c(domain_nx))
 
     ! Get electric field
     source = UC_elem_charge * (state%a(1:nx, iv_pion) - state%a(1:nx, iv_elec) &
          - state%a(1:nx, iv_nion))
-    call compute_field(source, -UC_elem_charge * state%s(i_lbound_elec), time)
+    surface_charge(:) = -UC_elem_charge * state%s([i_lbound_elec, i_rbound_elec])
+    call compute_field(source, surface_charge, time)
 
     ! Get locations in the lookup table
     fld_locs(:) = LT_get_loc(fluid_lkp_fld, abs(field_fc))
@@ -273,7 +286,7 @@ contains
 
     ! ~~~ Electron transport ~~~
     call get_flux_1d(state%a(:, iv_elec), -mob_c * field_fc, dif_c, &
-         domain_dx, flux, domain_ncell, n_ghost_cells)
+         domain_dx, flux, domain_nx, n_ghost_cells)
 
     ! ~~~ Ionization source ~~~ TODO: try different formulations
     ! fld_locs(1:nx) = LT_get_loc(fluid_lkp_fld, abs(field_cc))
@@ -300,18 +313,14 @@ contains
     !    time_derivs(:, iv_nion) = time_derivs(:, iv_nion) - source
     ! end if
 
-    do n = 1, domain_ncell
+    do n = 1, domain_nx
        derivs%a(n, iv_elec) = derivs%a(n, iv_elec) + &
             domain_inv_dx * (flux(n) - flux(n+1))
     end do
 
-    if (left_dielectric_present) then
-       ! Store changes in interior cell as surface charge
-       derivs%s(i_lbound_elec) = domain_dx * &
-            derivs%a(left_dielectric_iface-1, iv_elec)
-       derivs%a(left_dielectric_iface-1, iv_elec) = 0.0_dp
-       derivs%a(left_dielectric_iface-1, iv_pion) = 0.0_dp
-    end if
+    ! Take into account boundary fluxes
+    derivs%s(i_lbound_elec) = -flux(1)
+    derivs%s(i_rbound_elec) = flux(domain_nx+1)
 
     ! if (fluid_use_en) then
     !    ! ~~~ Energy source ~~~
@@ -357,7 +366,7 @@ contains
     real(dp)                     :: total_charge, elec_free, elec_bound
     integer                      :: my_unit
 
-    nx = domain_ncell
+    nx = domain_nx
     total_charge = domain_dx * sum(fluid_state%a(1:nx, iv_pion) &
          - fluid_state%a(1:nx, iv_elec)) &
          - fluid_state%s(i_lbound_elec)
@@ -368,7 +377,7 @@ contains
     write(fname, "(A,A,I0.6,A)") trim(base_fname), "_fluid_", ix, ".txt"
     open(newunit=my_unit, file=trim(fname))
 
-    do n = 1, domain_ncell
+    do n = 1, domain_nx
        write(my_unit, *) domain_dx * (n-0.5_dp), &
             fluid_state%a(n, iv_elec), &
             fluid_state%a(n, iv_pion), &

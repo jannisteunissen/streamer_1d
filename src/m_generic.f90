@@ -13,29 +13,26 @@ module m_generic
   integer, protected, public :: model_type     = 1
 
   real(dp), protected, public :: domain_length = 2.0e-3_dp
-  integer, protected, public  :: domain_ncell  = 500
+  integer, protected, public  :: domain_nx  = 500
   real(dp), protected, public :: domain_dx     = 2e-6_dp
   real(dp), protected, public :: domain_inv_dx = 5e5_dp
 
   !> The applied voltage
   real(dp), protected :: applied_voltage = 1e3_dp
 
-  !> Whether a dielectric is present on the left
-  logical, protected, public :: left_dielectric_present = .false.
+  !> Whether a dielectric is present on the left and right
+  logical, protected, public :: dielectric_present(2)
 
-  !> The boundary coordinate of the left dielectric
-  real(dp), protected, public :: left_dielectric_x = -1.0_dp
+  !> Width of the dielectric(s) (outside the computational domain)
+  real(dp), protected, public :: dielectric_width = 1.0e-3_dp
 
-  !> Relative permittivity of the left dielectric
-  real(dp), protected, public :: left_dielectric_eps = 2.0_dp
+  !> Relative permittivity of the dielectric(s)
+  real(dp), protected, public :: dielectric_eps = 2.0_dp
 
-  !> Cell face index of the dielectric boundary, where 1 is at 0.0
-  integer, protected, public :: left_dielectric_iface = -1
-
-  !> Electric field at cell centers
+  !> Electric field at cell centers, so field_cc(1) is centered at x = 0.5 dx
   real(dp), allocatable, protected, public :: field_cc(:)
 
-  !> Electric field at cell faces
+  !> Electric field at cell faces, so field_fc(1) is centered at x = 0.0 dx
   real(dp), allocatable, protected, public :: field_fc(:)
 
   integer, parameter :: init_gaussian_type = 1
@@ -87,6 +84,7 @@ contains
 
     character(len=40) :: init_type_name
     character(len=40) :: model_type_name
+    character(len=40) :: dielectric_side
 
     call CFG_add_get(cfg, "gas%name", gas_name, &
          "Name of gas mixture")
@@ -97,10 +95,10 @@ contains
 
     call CFG_add_get(cfg, "domain%length", domain_length, &
          "Length of the domain")
-    call CFG_add_get(cfg, "domain%n_cell", domain_ncell, &
+    call CFG_add_get(cfg, "domain%n_cell", domain_nx, &
          "Number of cells in the domain")
 
-    domain_dx        = domain_length / domain_ncell
+    domain_dx        = domain_length / domain_nx
     domain_inv_dx    = 1/domain_dx
 
     model_type_name = "fluid"
@@ -115,36 +113,26 @@ contains
     case default
        print *, "Invalid simulation type given: ", MODEL_type_name
        print *, "Supported are: particle, fluid"
-       error stop "Invalid simulation type"
+       error stop
     end select
 
-    allocate(field_cc(domain_ncell))
+    allocate(field_cc(domain_nx))
     field_cc(:) = 0.0_dp
 
     ! Field at cell faces includes one extra point
-    allocate(field_fc(domain_ncell+1))
+    allocate(field_fc(domain_nx+1))
     field_fc(:) = 0.0_dp
 
-    ! field_cc(1) is centered at x = 0.5 dx
-    ! field_fc(1) is centered at x = 0.0 dx
-
     call CFG_add_get(cfg, "field%voltage", applied_voltage, &
-         "Voltage (V) at right side of domain")
+         "Voltage difference (V) over domain (including dielectrics)")
 
-    call CFG_add_get(cfg, "left_dielectric%x", left_dielectric_x, &
-         "Interface position of left dielectric")
-    call CFG_add_get(cfg, "left_dielectric%eps", left_dielectric_eps, &
-         "Relative permittivity of left dielectric")
-
-    left_dielectric_present = (&
-         left_dielectric_x >= 0.0_dp .and. &
-         left_dielectric_x < domain_length .and. &
-         abs(left_dielectric_eps - 1.0_dp) > 0.0_dp)
-
-    if (left_dielectric_present) then
-       left_dielectric_iface = nint(left_dielectric_x / domain_dx) + 1
-       left_dielectric_x = (left_dielectric_iface-1) * domain_dx
-    end if
+    dielectric_present(:) = [.false., .false.]
+    call CFG_add_get(cfg, "dielectric%present", dielectric_present, &
+         "Whether a dielectric is present on the left and right")
+    call CFG_add_get(cfg, "dielectric%width", dielectric_width, &
+         "Width of the dielectric(s) in (m)")
+    call CFG_add_get(cfg, "dielectric%eps", dielectric_eps, &
+         "Relative permittivity of the dielectric(s)")
 
     init_type_name = "block"
     call CFG_add_get(cfg, "init%type", init_type_name, &
@@ -162,76 +150,56 @@ contains
     end select
   end subroutine generic_initialize
 
-  subroutine compute_field(net_charge, left_surface_charge, time)
+  subroutine compute_field(net_charge, surface_charge, time)
     use m_units_constants
-    real(dp), intent(in) :: net_charge(:), left_surface_charge, time
+    real(dp), intent(in) :: net_charge(:)
+    real(dp), intent(in) :: surface_charge(2)
+    real(dp), intent(in) :: time
     real(dp)             :: conv_fac, E_corr_gas, E_corr_eps
     real(dp)             :: pot_diff, pot_correct
-    integer              :: n, iface
+    integer              :: n
 
-    if (size(net_charge) /= domain_ncell) &
+    if (size(net_charge) /= domain_nx) &
          error stop "compute_field: argument has wrong size"
 
     conv_fac = domain_dx / UC_eps0
 
-    if (.not. left_dielectric_present) then
-       field_fc(1) = 0.0_dp
-       do n = 2, domain_ncell+1
-          field_fc(n) = field_fc(n-1) + net_charge(n-1) * conv_fac
-       end do
-
-       ! Compute total potential difference. Here we assign a weight of 0.5 to the
-       ! boundary values (on the dielectric and the wall)
-       pot_diff = -domain_dx * (sum(field_fc(2:domain_ncell)) + &
-            0.5_dp * (field_fc(1) + field_fc(domain_ncell+1)))
-
-       ! Have to correct the potential by this amount
-       pot_correct = get_potential(time) - pot_diff
-
-       E_corr_gas = -pot_correct / domain_length
-       field_fc = field_fc + E_corr_gas
-
-       do n = 1, domain_ncell
-          field_cc(n) = 0.5_dp * (field_fc(n) + field_fc(n+1))
-       end do
+    ! Starting guess for electric field on the left
+    if (dielectric_present(1)) then
+       field_fc(1) = surface_charge(1) / UC_eps0
     else
-       iface = left_dielectric_iface
-       ! First we start from a guess field_fc(1) = 0, which is the electric field
-       ! at the left domain boundary. Inside the dielectric, the field is constant.
-       field_fc(1:iface-1) = 0.0_dp
-
-       ! Note that on the dielectric boundary, the electric field is different on
-       ! both sides, but we only store the value outside the dielectric for now.
-       field_fc(iface) = left_surface_charge / UC_eps0
-
-       ! Handle the region outside the dielectric
-       do n = iface+1, domain_ncell+1
-          field_fc(n) = field_fc(n-1) + net_charge(n-1) * conv_fac
-       end do
-
-       ! Compute total potential difference. Here we assign a weight of 0.5 to the
-       ! boundary values (on the dielectric and the wall)
-       pot_diff = -domain_dx * (sum(field_fc(iface+1:domain_ncell)) + &
-            0.5_dp * (field_fc(iface) + field_fc(domain_ncell+1)))
-
-       ! Have to correct the potential by this amount
-       pot_correct = get_potential(time) - pot_diff
-
-       ! Correction in gas phase
-       E_corr_eps = -pot_correct / (left_dielectric_x + &
-            (domain_length-left_dielectric_x) * left_dielectric_eps)
-       E_corr_gas = E_corr_eps * left_dielectric_eps
-
-       field_fc(1:iface-1) = field_fc(1:iface-1) + E_corr_eps
-       field_fc(iface:domain_ncell+1) = &
-            field_fc(iface:domain_ncell+1) + E_corr_gas
-
-       ! Determine cell-centered field
-       field_cc(1:iface-1) = E_corr_eps
-       do n = iface, domain_ncell
-          field_cc(n) = 0.5_dp * (field_fc(n) + field_fc(n+1))
-       end do
+       field_fc(1) = 0.0_dp
     end if
+
+    ! Handle the interior region
+    do n = 2, domain_nx+1
+       field_fc(n) = field_fc(n-1) + net_charge(n-1) * conv_fac
+    end do
+
+    ! Compute total potential difference in the domain, with a weight of 0.5 for
+    ! the boundary field values
+    pot_diff = -domain_dx * (sum(field_fc(2:domain_nx)) + &
+         0.5_dp * (field_fc(1) + field_fc(domain_nx+1)))
+
+    if (dielectric_present(2)) then
+       ! Add contribution of field in right dielectric
+       pot_diff = pot_diff - dielectric_width / dielectric_eps * &
+            (field_fc(domain_nx+1) + surface_charge(2))
+    end if
+
+    ! Have to correct the potential by this amount
+    pot_correct = get_potential(time) - pot_diff
+
+    ! Determine the correction between the dielectrics
+    E_corr_gas = -pot_correct / (domain_length + &
+         count(dielectric_present) * dielectric_width/dielectric_eps)
+
+    field_fc(:) = field_fc(:) + E_corr_gas
+
+    ! Average to get cell-centered field
+    do n = 1, domain_nx
+       field_cc(n) = 0.5_dp * (field_fc(n) + field_fc(n+1))
+    end do
 
     ! print *, "total pot", -sum(field_cc) * domain_dx
   end subroutine compute_field
@@ -256,7 +224,7 @@ contains
     ! Coefficient for upper point between 0 and 1
     tmp    = low_ix - tmp
 
-    if (low_ix < 1 .or. low_ix > domain_ncell) then
+    if (low_ix < 1 .or. low_ix > domain_nx) then
        print *, "get_field_at invalid position x = ", x
        error stop
     end if
@@ -280,24 +248,20 @@ contains
     real(dp), intent(in) :: x
     real(dp)             :: dens
 
-    if (x > left_dielectric_x) then
-       select case (init_cond_type)
-       case (init_gaussian_type)
-          dens = init_density * &
-               exp(-(x - init_location)**2 / (2 * init_width**2))
-       case (init_block_type)
-          if (abs(x - init_location) < init_width) then
-             dens = init_density
-          else
-             dens = 0.0_dp
-          end if
-       case default
-          ! This should never occur, as input is checked before
+    select case (init_cond_type)
+    case (init_gaussian_type)
+       dens = init_density * &
+            exp(-(x - init_location)**2 / (2 * init_width**2))
+    case (init_block_type)
+       if (abs(x - init_location) < init_width) then
+          dens = init_density
+       else
           dens = 0.0_dp
-       end select
-    else
+       end if
+    case default
+       ! This should never occur, as input is checked before
        dens = 0.0_dp
-    end if
+    end select
   end function get_dens
 
   elemental function init_elec_dens(x) result(elec_dens)

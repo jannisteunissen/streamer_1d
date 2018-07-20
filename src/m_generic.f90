@@ -42,16 +42,19 @@ module m_generic
   integer :: init_cond_type = init_block_type
 
   !> Initial condition location (as coordinate)
-  real(dp)            :: init_location = 1.0e-3_dp
+  real(dp)            :: init_location = 0.0e-3_dp
 
   !> Initial condition width
-  real(dp)            :: init_width = 1.0e-4_dp
+  real(dp)            :: init_width = 3.0e-4_dp
 
   !> Initial condition charge type (1: positive ions, -1: electrons, 0: neutral)
   real(dp)            :: init_charge_type = 0
 
   !> Initial condition density
-  real(dp)            :: init_density = 1.0e9_dp
+  real(dp)            :: init_density = 1.0e15_dp
+
+  !> Initial condition density
+  real(dp)            :: init_background_density = 0.0e9_dp
 
   !> Initial condition density
   real(dp)            :: init_energy = 1.0_dp
@@ -140,7 +143,7 @@ contains
     call CFG_add_get(cfg, "dielectric%eps", dielectric_eps, &
          "Relative permittivity of the dielectric(s)")
 
-    init_type_name = "block"
+    init_type_name = "gaussian"
     call CFG_add_get(cfg, "init%type", init_type_name, &
          "Type of initial condition (block or gaussian)")
 
@@ -268,6 +271,8 @@ contains
        ! This should never occur, as input is checked before
        dens = 0.0_dp
     end select
+
+    dens = dens + init_background_density
   end function get_dens
 
   elemental function init_elec_dens(x) result(elec_dens)

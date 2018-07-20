@@ -19,16 +19,16 @@ module m_fluid_1d
   integer            :: num_arrays
   integer            :: iv_elec, iv_pion, iv_en, iv_nion
 
-  integer, parameter :: num_scalars = 2
+  integer, parameter :: num_scalars = 4
   integer, parameter :: i_lbound_elec = 1
   integer, parameter :: i_rbound_elec = 2
+  integer, parameter :: i_lbound_pion = 3
+  integer, parameter :: i_rbound_pion = 4
 
   integer :: if_mob, if_dif, if_src, if_en
   integer :: if_att, if_det, fluid_num_fld_coef
   integer :: fluid_ie_mob, fluid_ie_dif, fluid_ie_src
   integer :: fluid_ie_att, fluid_ie_loss, fluid_num_en_coef
-  ! logical :: fluid_use_en, fluid_use_en_mob, fluid_use_en_dif
-  ! logical :: fluid_use_en_src, fluid_use_detach
 
   type state_t
      real(dp), allocatable :: a(:, :) ! arrays
@@ -39,6 +39,23 @@ module m_fluid_1d
 
   real(dp) :: fluid_small_dens
   type(LT_t) :: fluid_lkp_fld, fluid_lkp_en
+
+  !> Mobility for ions
+  real(dp) :: ion_mobility = 5e-4_dp
+
+  !> Diffusion coefficient for ions
+  real(dp) :: ion_diffusion = 1e-4_dp
+
+  !> Secondary emission yield for ion impact
+  real(dp) :: secondary_emission_yield = 1.0e-2_dp
+
+  real(dp) :: photons_per_ionization = 1e-2_dp
+
+  !> Secondary emission yield for photons
+  real(dp) :: photon_emission_yield = 1.0e-5_dp
+
+  !> Set density to zero below this value
+  real(dp) :: fluid_small_density = 1.0_dp
 
   public :: fluid_initialize
   public :: fluid_advance
@@ -89,33 +106,10 @@ contains
        error stop
     end select
 
-    ! call CFG_get(cfg, "fluid%small_density", fluid_small_dens, &
-    !      "Small fluid density")
-    ! fluid_max_energy = max_energy
-
-    ! if (MODEL_type == MODEL_fluid_ee) then
-    !    fluid_use_en     = .true.
-    !    call CFG_get(cfg, "fluid_use_en_mob", fluid_use_en_mob)
-    !    call CFG_get(cfg, "fluid_use_en_dif", fluid_use_en_dif)
-    !    call CFG_get(cfg, "fluid_use_en_src", fluid_use_en_src)
-    !    call CFG_get(cfg, "fluid_use_detach", fluid_use_detach)
-    ! else
-    !    fluid_use_en     = .false.
-    !    fluid_use_en_mob = .false.
-    !    fluid_use_en_dif = .false.
-    !    fluid_use_en_src = .false.
-    !    fluid_use_detach = .false.
-    ! end if
-
     num_arrays = 3
     iv_elec = 1
     iv_pion = 2
     iv_nion = 3
-
-    ! if (fluid_use_en) then
-    !    num_arrays = num_arrays + 1
-    !    iv_en = num_arrays
-    ! end if
 
     n = n_ghost_cells
     allocate(fluid_state%a(1-n:domain_nx+n, num_arrays))
@@ -129,16 +123,12 @@ contains
 
     call CFG_add(cfg, "fluid%fld_mob", "efield[V/m]_vs_mu[m2/Vs]", &
          "The name of the mobility coefficient")
-    ! call CFG_add(cfg, "fluid%fld_en", "efield[V/m]_vs_energy[eV]", &
-    !      "The name of the energy(fld) coefficient")
     call CFG_add(cfg, "fluid%fld_dif", "efield[V/m]_vs_dif[m2/s]", &
          "The name of the diffusion coefficient")
     call CFG_add(cfg, "fluid%fld_alpha", "efield[V/m]_vs_alpha[1/m]", &
          "The name of the eff. ionization coeff.")
     call CFG_add(cfg, "fluid%fld_eta", "efield[V/m]_vs_eta[1/m]", &
          "The name of the eff. attachment coeff.")
-    ! call CFG_add(cfg, "fluid%fld_loss", "efield[V/m]_vs_loss[eV/s]", &
-    !      "The name of the energy loss coeff.")
     ! call CFG_add(cfg, "fluid%fld_det", "efield[V/m]_vs_det[1/s]", &
     !      "The name of the detachment rate coeff.")
 
@@ -172,12 +162,6 @@ contains
     !    call LT_add_col(fluid_lkp_fld, x_data, y_data)
     !    if_det= fluid_lkp_fld%n_cols
     ! end if
-
-    ! call CFG_get(cfg, "fluid_fld_en", data_name)
-    ! call TD_get_td_from_file(input_file, gas_name, &
-    !      trim(data_name), x_data, y_data)
-    ! call LT_add_col(fluid_lkp_fld, x_data, y_data)
-    ! if_en = fluid_lkp_fld%n_cols
 
     fluid_num_fld_coef = fluid_lkp_fld%n_cols
     fluid_num_en_coef  = fluid_lkp_en%n_cols
@@ -222,15 +206,18 @@ contains
     real(dp), intent(in)         :: time
     type(state_t), intent(inout) :: derivs
 
-    integer                     :: n, nx
-    real(dp)                    :: surface_charge(2)
-    real(dp), parameter         :: five_third = 5 / 3.0_dp
-    real(dp), allocatable       :: mob_c(:), dif_c(:), src_c(:)
-    real(dp), allocatable       :: flux(:)
-    real(dp), allocatable       :: source(:)
-    type(LT_loc_t), allocatable :: fld_locs(:)
+    integer                      :: n, nx
+    real(dp)                     :: surface_charge(2), se
+    real(dp), parameter          :: five_third = 5 / 3.0_dp
+    real(dp), allocatable        :: mob_c(:), dif_c(:), src_c(:)
+    real(dp), allocatable        :: flux(:)
+    real(dp), allocatable        :: source(:)
+    type(LT_loc_t), allocatable  :: fld_locs(:)
 
     nx = domain_nx
+
+    derivs%a(:, :) = 0.0_dp
+    derivs%s(:)    = 0.0_dp
 
     call set_boundary_conditions(state)
 
@@ -239,13 +226,15 @@ contains
     allocate(dif_c(nx+1))
     allocate(src_c(nx+1))
     allocate(fld_locs(nx+1))
-    ! allocate(att_c(domain_nx))
-    ! allocate(det_c(domain_nx))
+    ! allocate(att_c(nx))
+    ! allocate(det_c(nx))
 
     ! Get electric field
     source = UC_elem_charge * (state%a(1:nx, iv_pion) - state%a(1:nx, iv_elec) &
          - state%a(1:nx, iv_nion))
-    surface_charge = -UC_elem_charge * state%s([i_lbound_elec, i_rbound_elec])
+    surface_charge = UC_elem_charge * (&
+         state%s([i_lbound_pion, i_rbound_pion]) - &
+         state%s([i_lbound_elec, i_rbound_elec]))
     call compute_field(source, surface_charge, time)
 
     ! Get locations in the lookup table
@@ -254,53 +243,14 @@ contains
     dif_c = 0.0_dp * LT_get_col_at_loc(fluid_lkp_fld, if_dif, fld_locs)
     src_c = LT_get_col_at_loc(fluid_lkp_fld, if_src, fld_locs)
 
-    ! if (fluid_use_en) then
-    !    ! There is a regularization: at density zero, we use the energy corresponding to the efield
-    !    fld_en = LT_get_col_at_loc(fluid_lkp_fld, if_en, fld_locs)
-    !    mean_en = (state%a(1:n_cc-1, iv_en) + state%a(2:n_cc, iv_en) + 2 * fluid_small_dens * fld_en) &
-    !         / (state%a(1:n_cc-1, iv_elec) + state%a(2:n_cc, iv_elec) + 2 * fluid_small_dens)
-    !    en_locs = LT_get_loc(fluid_lkp_en, mean_en)
-    !    en_loss = LT_get_col_at_loc(fluid_lkp_en, fluid_ie_loss, en_locs)
-    ! end if
-
-    ! if (fluid_use_en_mob) then
-    !    mob_c = LT_get_col_at_loc(fluid_lkp_en, fluid_ie_mob, en_locs)
-    ! else
-    ! end if
-
-    ! if (fluid_use_en_dif) then
-    ! dif_c = LT_get_col_at_loc(fluid_lkp_en, fluid_ie_dif, en_locs)
-    ! else
-
-    ! end if
-
-    ! if (fluid_use_en_src) then
-    !    src_c = LT_get_col_at_loc(fluid_lkp_en, fluid_ie_src, en_locs)
-    !    att_c = LT_get_col_at_loc(fluid_lkp_en, fluid_ie_att, en_locs)
-    ! else
-    ! att_c = LT_get_col_at_loc(fluid_lkp_fld, if_att, fld_locs)
-    ! end if
-    ! if (fluid_use_detach) det_c = LT_get_col_at_loc(fluid_lkp_fld, if_det, fld_locs)
-
-    ! ~~~ Electron transport ~~~
     call get_flux_1d(state%a(:, iv_elec), -mob_c * field_fc, dif_c, &
-         domain_dx, flux, domain_nx, n_ghost_cells)
+         domain_dx, flux, nx, n_ghost_cells)
 
-    ! ~~~ Ionization source ~~~ TODO: try different formulations
-    ! fld_locs(1:nx) = LT_get_loc(fluid_lkp_fld, abs(field_cc))
-    ! src_c(1:nx) = LT_get_col_at_loc(fluid_lkp_fld, if_src, fld_locs(1:nx))
-    ! mob_c(1:nx) = LT_get_col_at_loc(fluid_lkp_fld, if_mob, fld_locs(1:nx))
-
-    ! source = src_c(1:nx) * mob_c(1:nx) * abs(field_cc) * state%a(1:nx, iv_elec)
     call set_stagg_source_1d(source, src_c * abs(flux))
-
     derivs%a(1:nx, iv_elec) = source
     derivs%a(1:nx, iv_pion) = source
 
     ! ~~~ Attachment source ~~~ TODO: try different formulations
-    ! call set_stagg_source_1d(source, att_c * abs(flux))
-    ! time_derivs(:, iv_elec) = time_derivs(:, iv_elec) - source
-    ! time_derivs(:, iv_nion) = time_derivs(:, iv_nion) + source
 
     ! Detachment process
     ! if (fluid_use_detach) then
@@ -311,15 +261,49 @@ contains
     !    time_derivs(:, iv_nion) = time_derivs(:, iv_nion) - source
     ! end if
 
-    do n = 1, domain_nx
+    do n = 1, nx
        derivs%a(n, iv_elec) = derivs%a(n, iv_elec) + &
             domain_inv_dx * (flux(n) - flux(n+1))
     end do
 
     ! Take into account boundary fluxes
     derivs%s(i_lbound_elec) = -flux(1)
-    derivs%s(i_rbound_elec) = flux(domain_nx+1)
+    derivs%s(i_rbound_elec) = flux(nx+1)
 
+    ! Photon fluxes on left and right sides
+    ! se = 0.5_dp * sum(source) * &
+    !      photons_per_ionization * photon_emission_yield
+
+    ! derivs%a(1, iv_elec) = derivs%a(1, iv_elec) + se * domain_inv_dx
+    ! derivs%a(nx, iv_elec) = derivs%a(nx, iv_elec) + se * domain_inv_dx
+    ! derivs%s(i_lbound_elec) = derivs%s(i_lbound_elec) - se
+    ! derivs%s(i_rbound_elec) = derivs%s(i_lbound_elec) - se
+
+    if (.true.) then
+       ! Compute ion flux
+       mob_c(:) = ion_mobility
+       dif_c(:) = ion_diffusion
+
+       call get_flux_1d(state%a(:, iv_pion), mob_c * field_fc, dif_c, &
+            domain_dx, flux, nx, n_ghost_cells)
+       do n = 1, nx
+          derivs%a(n, iv_pion) = derivs%a(n, iv_pion) + &
+               domain_inv_dx * (flux(n) - flux(n+1))
+       end do
+
+       ! Take into account boundary fluxes
+       derivs%s(i_lbound_pion) = -flux(1)
+       derivs%s(i_rbound_pion) = flux(nx+1)
+
+       ! Secondary emission of electrons
+       se = -secondary_emission_yield * flux(1)
+       derivs%a(1, iv_elec) = derivs%a(1, iv_elec) + se * domain_inv_dx
+       derivs%s(i_lbound_elec) = derivs%s(i_lbound_elec) - se
+
+       se = secondary_emission_yield * flux(nx+1)
+       derivs%a(nx, iv_elec) = derivs%a(nx, iv_elec) + se * domain_inv_dx
+       derivs%s(i_rbound_elec) = derivs%s(i_rbound_elec) - se
+    end if
   end subroutine fluid_derivs
 
   subroutine set_stagg_source_1d(dens_c, src_f)
@@ -347,8 +331,9 @@ contains
     write(fname, "(A,A,I0.6,A)") trim(base_fname), "_fluid_", ix, ".txt"
     open(newunit=my_unit, file=trim(fname))
 
+    write(my_unit, "(A)") "x field electron pos_ion"
     do n = 1, domain_nx
-       write(my_unit, *) domain_dx * (n-0.5_dp), &
+       write(my_unit, "(4e13.5)") domain_dx * (n-0.5_dp), &
             field_cc(n), &
             fluid_state%a(n, iv_elec), &
             fluid_state%a(n, iv_pion)
@@ -367,57 +352,13 @@ contains
 
     total_charge = domain_dx * sum(fluid_state%a(1:nx, iv_pion) &
          - fluid_state%a(1:nx, iv_elec)) &
-         - fluid_state%s(i_lbound_elec) &
-         - fluid_state%s(i_rbound_elec)
+         - fluid_state%s(i_lbound_elec) - fluid_state%s(i_rbound_elec) &
+         + fluid_state%s(i_lbound_pion) + fluid_state%s(i_rbound_pion)
 
     write(my_unit, *) time, fluid_state%s(i_lbound_elec), &
          fluid_state%s(i_rbound_elec), total_charge
     close(my_unit)
   end subroutine fluid_write_output
-
-  ! subroutine fluid_get_coeffs(coeff_data, coeff_names, n_coeffs)
-  !   real(dp), intent(out), allocatable :: coeff_data(:,:)
-  !   character(len=*), intent(out), allocatable :: coeff_names(:)
-  !   integer, intent(out) :: n_coeffs
-  !   integer :: ix, n_rows, n_fld_coeffs, n_en_coeffs
-
-  !   if (fluid_use_en) then
-  !      n_en_coeffs = fluid_lkp_en%n_cols + 1
-  !   else
-  !      n_en_coeffs = 0
-  !   end if
-  !   n_fld_coeffs = fluid_lkp_fld%n_cols + 1
-
-  !   n_coeffs = n_fld_coeffs + n_en_coeffs
-  !   n_rows = fluid_lkp_fld%n_points
-  !   allocate(coeff_data(n_coeffs, n_rows))
-  !   allocate(coeff_names(n_coeffs))
-
-  !   call LT_get_data(fluid_lkp_fld, coeff_data(1, :), coeff_data(2:n_fld_coeffs, :))
-  !   coeff_names(1) = "efield (V/m)"
-  !   coeff_names(1+if_en) = "fld_en (eV)"
-  !   if (fluid_use_detach) coeff_names(1+if_det) = "fld_det (1/s)"
-  !   if (.not. fluid_use_en_mob) coeff_names(1+if_mob) = "fld_mob (m2/Vs)"
-  !   if (.not. fluid_use_en_dif) coeff_names(1+if_dif) = "fld_dif (m2/s)"
-  !   if (.not. fluid_use_en_src) then
-  !      coeff_names(1+if_src) = "fld_src (1/m)"
-  !      coeff_names(1+if_att) = "fld_att (1/m)"
-  !   end if
-
-  !   if (fluid_use_en) then
-  !      ix = n_fld_coeffs + 1
-  !      call LT_get_data(fluid_lkp_en, coeff_data(ix, :), coeff_data(ix+1:, :))
-  !      coeff_names(ix) = "energy (eV/s)"
-  !      coeff_names(ix+fluid_ie_loss) = "en_loss (eV/s)"
-  !      if (fluid_use_en_mob) coeff_names(ix+fluid_ie_mob) = "en_mob (m2/Vs)"
-  !      if (fluid_use_en_dif) coeff_names(ix+fluid_ie_dif) = "en_dif (m2/s)"
-  !      if (fluid_use_en_src) then
-  !         coeff_names(ix+fluid_ie_src) = "en_src (1/m)"
-  !         coeff_names(ix+fluid_ie_att) = "en_att (1/m)"
-  !      end if
-  !   end if
-
-  ! end subroutine fluid_get_coeffs
 
   subroutine fluid_advance(dt, time)
     real(dp), intent(in) :: dt
@@ -500,6 +441,10 @@ contains
     case default
        error stop "Unknown time stepping scheme"
     end select
+
+    where (fluid_state%a < fluid_small_density)
+       fluid_state%a = 0.0_dp
+    end where
   end subroutine fluid_advance
 
   !> Compute advective and diffusive flux

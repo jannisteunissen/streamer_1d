@@ -74,7 +74,7 @@ program streamer_1d
   ! Initialize variables
   time      = 0.0_dp
   output_ix = 0
-  info_cntr = 0
+  info_cntr = 1
   it        = 0
 
   call system_clock(time_start, count_rate)

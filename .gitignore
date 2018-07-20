@@ -1,0 +1,4 @@
+/src/*.o
+/src/*.mod
+/streamer_1d
+/output/*

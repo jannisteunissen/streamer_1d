@@ -17,7 +17,7 @@ module m_fluid_1d
   integer            :: time_step_method = rk2
 
   integer            :: num_arrays
-  integer            :: iv_elec, iv_pion, iv_en, iv_nion
+  integer            :: iv_elec, iv_pion, iv_nion
 
   integer, parameter :: num_scalars = 4
   integer, parameter :: i_lbound_elec = 1
@@ -25,10 +25,8 @@ module m_fluid_1d
   integer, parameter :: i_lbound_pion = 3
   integer, parameter :: i_rbound_pion = 4
 
-  integer :: if_mob, if_dif, if_src, if_en
-  integer :: if_att, if_det, fluid_num_fld_coef
-  integer :: fluid_ie_mob, fluid_ie_dif, fluid_ie_src
-  integer :: fluid_ie_att, fluid_ie_loss, fluid_num_en_coef
+  integer :: if_mob, if_dif, if_src
+  integer :: if_att, fluid_num_fld_coef
 
   type state_t
      real(dp), allocatable :: a(:, :) ! arrays
@@ -37,8 +35,10 @@ module m_fluid_1d
 
   type(state_t) :: fluid_state
 
-  real(dp) :: fluid_small_dens
-  type(LT_t) :: fluid_lkp_fld, fluid_lkp_en
+  type(LT_t) :: fluid_lkp_fld
+
+  !> Whether ion transport is included
+  logical :: ion_transport = .true.
 
   !> Mobility for ions
   real(dp) :: ion_mobility = 5e-4_dp
@@ -164,7 +164,6 @@ contains
     ! end if
 
     fluid_num_fld_coef = fluid_lkp_fld%n_cols
-    fluid_num_en_coef  = fluid_lkp_en%n_cols
 
     ! Initialization of electron and ion density
     do n = 1, domain_nx
@@ -200,19 +199,23 @@ contains
 
   end subroutine set_boundary_conditions
 
-  subroutine fluid_derivs(state, time, derivs)
+  subroutine fluid_derivs(state, time, derivs, dt_max)
     use m_units_constants
-    type(state_t), intent(inout) :: state
-    real(dp), intent(in)         :: time
-    type(state_t), intent(inout) :: derivs
+    type(state_t), intent(inout)    :: state
+    real(dp), intent(in)            :: time
+    type(state_t), intent(inout)    :: derivs
+    real(dp), intent(out), optional :: dt_max
 
-    integer                      :: n, nx
-    real(dp)                     :: surface_charge(2), se
-    real(dp), parameter          :: five_third = 5 / 3.0_dp
-    real(dp), allocatable        :: mob_c(:), dif_c(:), src_c(:)
-    real(dp), allocatable        :: flux(:)
-    real(dp), allocatable        :: source(:)
-    type(LT_loc_t), allocatable  :: fld_locs(:)
+    type(LT_loc_t), allocatable :: fld_locs(:)
+    integer                     :: n, nx
+    real(dp)                    :: surface_charge(2), se
+    real(dp), allocatable       :: mob_e(:), diff_e(:), src_e(:)
+    real(dp), allocatable       :: mob_i(:), diff_i(:)
+    real(dp), allocatable       :: flux(:)
+    real(dp), allocatable       :: source(:)
+    real(dp), allocatable       :: sigma(:)
+    real(dp)                    :: dt_cfl, dt_dif, dt_drt
+    real(dp), parameter         :: eps = 1e-100_dp
 
     nx = domain_nx
 
@@ -222,12 +225,12 @@ contains
     call set_boundary_conditions(state)
 
     allocate(flux(1:nx+1))
-    allocate(mob_c(nx+1))
-    allocate(dif_c(nx+1))
-    allocate(src_c(nx+1))
+    allocate(mob_e(nx+1))
+    allocate(mob_i(nx+1))
+    allocate(diff_e(nx+1))
+    allocate(diff_i(nx+1))
+    allocate(src_e(nx+1))
     allocate(fld_locs(nx+1))
-    ! allocate(att_c(nx))
-    ! allocate(det_c(nx))
 
     ! Get electric field
     source = UC_elem_charge * (state%a(1:nx, iv_pion) - state%a(1:nx, iv_elec) &
@@ -239,14 +242,16 @@ contains
 
     ! Get locations in the lookup table
     fld_locs(:) = LT_get_loc(fluid_lkp_fld, abs(field_fc))
-    mob_c = LT_get_col_at_loc(fluid_lkp_fld, if_mob, fld_locs)
-    dif_c = 0.0_dp * LT_get_col_at_loc(fluid_lkp_fld, if_dif, fld_locs)
-    src_c = LT_get_col_at_loc(fluid_lkp_fld, if_src, fld_locs)
+    mob_e = LT_get_col_at_loc(fluid_lkp_fld, if_mob, fld_locs)
+    diff_e = LT_get_col_at_loc(fluid_lkp_fld, if_dif, fld_locs)
+    src_e = LT_get_col_at_loc(fluid_lkp_fld, if_src, fld_locs)
 
-    call get_flux_1d(state%a(:, iv_elec), -mob_c * field_fc, dif_c, &
+    ! Compute electron flux
+    call get_flux_1d(state%a(:, iv_elec), -mob_e * field_fc, diff_e, &
          domain_dx, flux, nx, n_ghost_cells)
 
-    call set_stagg_source_1d(source, src_c * abs(flux))
+    ! Compute source term per cell using the fluxes at cell faces
+    call set_stagg_source_1d(source, src_e * abs(flux))
     derivs%a(1:nx, iv_elec) = source
     derivs%a(1:nx, iv_pion) = source
 
@@ -279,13 +284,14 @@ contains
     ! derivs%s(i_lbound_elec) = derivs%s(i_lbound_elec) - se
     ! derivs%s(i_rbound_elec) = derivs%s(i_lbound_elec) - se
 
-    if (.true.) then
-       ! Compute ion flux
-       mob_c(:) = ion_mobility
-       dif_c(:) = ion_diffusion
+    ! Ion transport
+    if (ion_transport) then
+       diff_i(:) = ion_diffusion
+       mob_i(:) = ion_mobility
 
-       call get_flux_1d(state%a(:, iv_pion), mob_c * field_fc, dif_c, &
-            domain_dx, flux, nx, n_ghost_cells)
+       ! Compute ion flux
+       call get_flux_1d(state%a(:, iv_pion), mob_i * field_fc, &
+            diff_i, domain_dx, flux, nx, n_ghost_cells)
        do n = 1, nx
           derivs%a(n, iv_pion) = derivs%a(n, iv_pion) + &
                domain_inv_dx * (flux(n) - flux(n+1))
@@ -303,6 +309,34 @@ contains
        se = secondary_emission_yield * flux(nx+1)
        derivs%a(nx, iv_elec) = derivs%a(nx, iv_elec) + se * domain_inv_dx
        derivs%s(i_rbound_elec) = derivs%s(i_rbound_elec) - se
+    end if
+
+    if (present(dt_max)) then
+       ! Determine maximal time step
+
+       ! CFL condition
+       dt_cfl = domain_dx / max(eps, &
+            maxval(abs(field_fc * max(mob_e, mob_i))))
+
+       ! Diffusion condition
+       dt_dif = 0.5_dp * domain_dx**2 / &
+            max(eps, maxval(diff_e), maxval(diff_i))
+
+       ! Determine conductivity (overestimate by taking maximum, and assume
+       ! quasi-neutrality for ion contribution)
+       allocate(sigma(nx+1))
+       sigma(:) = (mob_e + mob_i) * &
+            max(state%a(0:nx, iv_elec), state%a(1:nx+1, iv_elec))
+
+       ! Dielectric relaxation time
+       dt_drt = UC_eps0 / (UC_elem_charge * max(eps, maxval(sigma)))
+
+       ! Take the minimum of the CFL condition with Courant number 0.5 and
+       ! the combined CFL-diffusion condition with Courant number 1.0. The
+       ! 0.5 is emperical, to have good accuracy (and TVD/positivity) in
+       ! combination with the explicit trapezoidal rule
+       dt_max = min(0.5_dp * dt_cfl, 1/(1/dt_cfl + 1/dt_dif))
+       dt_max = min(dt_max, dt_drt)
     end if
   end subroutine fluid_derivs
 
@@ -360,10 +394,11 @@ contains
     close(my_unit)
   end subroutine fluid_write_output
 
-  subroutine fluid_advance(dt, time)
-    real(dp), intent(in) :: dt
-    real(dp), intent(in) :: time
-    real(dp), parameter  :: one_sixth = 1 / 6.0_dp
+  subroutine fluid_advance(dt, time, max_dt)
+    real(dp), intent(in)  :: dt
+    real(dp), intent(in)  :: time
+    real(dp), intent(out) :: max_dt
+    real(dp), parameter   :: one_sixth = 1 / 6.0_dp
 
     type(state_t) :: derivs
     type(state_t) :: sum_derivs
@@ -374,7 +409,7 @@ contains
 
     select case (time_step_method)
     case (forward_euler)
-       call fluid_derivs(fluid_state, time, derivs)
+       call fluid_derivs(fluid_state, time, derivs, max_dt)
        fluid_state%a = fluid_state%a + dt * derivs%a
        fluid_state%s = fluid_state%s + dt * derivs%s
     case (trapezoidal)
@@ -384,7 +419,7 @@ contains
        substep%a = substep%a + dt * derivs%a
        substep%s = substep%s + dt * derivs%s
 
-       call fluid_derivs(substep, time+dt, derivs)
+       call fluid_derivs(substep, time+dt, derivs, max_dt)
        substep%a = substep%a + dt * derivs%a
        substep%s = substep%s + dt * derivs%s
 
@@ -399,7 +434,7 @@ contains
        substep%s = substep%s + 0.5_dp * dt * derivs%s
 
        ! Step 2 (at initial time + dt/2)
-       call fluid_derivs(substep, time + 0.5_dp * dt, derivs)
+       call fluid_derivs(substep, time + 0.5_dp * dt, derivs, max_dt)
 
        ! Result (at initial time + dt)
        fluid_state%a = fluid_state%a + dt * derivs%a
@@ -430,7 +465,7 @@ contains
        ! Step 4 (at initial time + dt)
        substep%a = fluid_state%a + dt * derivs%a
        substep%s = fluid_state%s + dt * derivs%s
-       call fluid_derivs(substep, time + dt, derivs)
+       call fluid_derivs(substep, time + dt, derivs, max_dt)
 
        sum_derivs%a = sum_derivs%a + derivs%a
        sum_derivs%s = sum_derivs%s + derivs%s

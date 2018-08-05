@@ -27,7 +27,7 @@ program streamer_1d
   integer :: info_cntr
 
   real(dp) :: time, end_time
-  real(dp) :: dt, dt_initial, dt_max, dt_min
+  real(dp) :: dt, dt_next, dt_max, dt_min, dt_limit
   real(dp) :: dt_output
   real(dp) :: time_elapsed
   integer  :: time_now, time_start, count_rate
@@ -43,8 +43,8 @@ program streamer_1d
   end_iteration = huge(1)
   call CFG_add_get(cfg, "end%iteration", end_iteration, "End iteration")
 
-  dt_initial = 1e-12_dp
-  call CFG_add_get(cfg, "dt%initial", dt_initial, "Initial time step (s)")
+  dt_next = 1e-12_dp
+  call CFG_add_get(cfg, "dt%initial", dt_next, "Initial time step (s)")
 
   dt_max = 1e-11_dp
   call CFG_add_get(cfg, "dt%max", dt_max, "Maximal time step (s)")
@@ -57,7 +57,7 @@ program streamer_1d
        "Base file name for output")
 
   dt_output = 1.0e-10_dp
-  call CFG_add_get(cfg, "output%interval", dt_output, &
+  call CFG_add_get(cfg, "output%dt", dt_output, &
          "The time step for writing output")
 
   print *, "Initialize generic"
@@ -89,7 +89,7 @@ program streamer_1d
         write(*, "(F6.2,A)") 100.0_dp * time/end_time, "% complete"
      end if
 
-     dt = dt_initial
+     dt = dt_next
      write_output = (time + dt >= output_ix * dt_output)
 
      if (write_output) then
@@ -98,7 +98,9 @@ program streamer_1d
      end if
 
      if (model_type == model_fluid) then
-        call fluid_advance(dt, time)
+        call fluid_advance(dt, time, dt_limit)
+
+        dt_next = get_new_dt(dt_next, dt_limit)
 
         if (write_output) then
            call fluid_write_output(trim(output_name), time, output_ix)
@@ -109,16 +111,9 @@ program streamer_1d
         if (write_output) then
            call particle_write_output(trim(output_name), time, output_ix)
         end if
-        ! do_apm = (n_it_apm > 0 .and. mod(it, n_steps_apm) == 0) &
-        !      .or. PM_get_num_sim_part() > prev_apm_part * apm_increase
-        
-        ! if (do_apm) prev_apm_part = PM_get_num_sim_part()
-
-        ! time = time + dt
-        ! stop_dens = (PM_max_edens_at_boundary() > small_dens)
      end if
 
-     it = it + 1
+     it   = it + 1
      time = time + dt
   end do
 
@@ -188,7 +183,7 @@ contains
   !        "The name of the gas mixture used")
   !   call CFG_add(cfg, "gas_comp_names", (/"N2"/), &
   !        "The names of the gases used in the simulation", .true.)
-    
+
   !   call CFG_add(cfg, "gas_comp_fracs", (/1.0_dp /), &
   !        "The partial pressure of the gases", .true.)
 
@@ -294,5 +289,16 @@ contains
        close(my_unit, status='delete')
     end if
   end subroutine check_output_folder
+
+  real(dp) function get_new_dt(dt, dt_limit)
+    real(dp), intent(in) :: dt, dt_limit
+
+    if (dt > dt_limit) then
+       get_new_dt = dt_limit
+    else
+       ! Increase time step at most by 10%
+       get_new_dt = min(1.1_dp * dt, dt_limit)
+    end if
+  end function get_new_dt
 
 end program

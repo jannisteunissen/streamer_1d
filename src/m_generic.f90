@@ -42,7 +42,7 @@ module m_generic
   integer :: init_cond_type = init_block_type
 
   !> Initial condition location (as coordinate)
-  real(dp)            :: init_location = 0.0e-3_dp
+  real(dp)            :: init_location = 1.0e-3_dp
 
   !> Initial condition width
   real(dp)            :: init_width = 3.0e-4_dp
@@ -53,10 +53,10 @@ module m_generic
   !> Initial condition density
   real(dp)            :: init_density = 1.0e15_dp
 
-  !> Initial condition density
+  !> Initial background density
   real(dp)            :: init_background_density = 0.0e9_dp
 
-  !> Initial condition density
+  !> Initial energy for particles
   real(dp)            :: init_energy = 1.0_dp
 
   !> Name of gas mixture
@@ -143,7 +143,7 @@ contains
     call CFG_add_get(cfg, "dielectric%eps", dielectric_eps, &
          "Relative permittivity of the dielectric(s)")
 
-    init_type_name = "gaussian"
+    init_type_name = "block"
     call CFG_add_get(cfg, "init%type", init_type_name, &
          "Type of initial condition (block or gaussian)")
 
@@ -157,6 +157,18 @@ contains
        print *, "Options are: block, gaussian"
        error stop
     end select
+
+    call CFG_add_get(cfg, "init%width", init_width, &
+         "Initial condition width (m)")
+    call CFG_add_get(cfg, "init%charge_type", init_charge_type, &
+         "Initial condition charge type (1: p.ions, -1: e-, 0: neutral)")
+    call CFG_add_get(cfg, "init%density", init_density, &
+         "Initial condition density (1/m^3)")
+    call CFG_add_get(cfg, "init%location", init_location, &
+         "Initial condition location (m)")
+    call CFG_add_get(cfg, "init%background_density", &
+         init_background_density, "Initial background density (1/m^3)")
+
   end subroutine generic_initialize
 
   subroutine compute_field(net_charge, surface_charge, time)

@@ -16,8 +16,10 @@ module m_fluid_1d
   integer, parameter :: rk4              = 4
   integer            :: time_step_method = rk2
 
-  integer            :: num_arrays
-  integer            :: iv_elec, iv_pion, iv_nion
+  integer, parameter :: num_arrays = 3
+  integer, parameter :: iv_elec    = 1
+  integer, parameter :: iv_pion    = 2
+  integer, parameter :: iv_nion    = 3
 
   integer, parameter :: num_scalars = 4
   integer, parameter :: i_lbound_elec = 1
@@ -37,25 +39,17 @@ module m_fluid_1d
 
   type(LT_t) :: fluid_lkp_fld
 
-  !> Whether ion transport is included
-  logical :: ion_transport = .true.
-
-  !> Mobility for ions
-  real(dp) :: ion_mobility = 5e-4_dp
-
-  !> Diffusion coefficient for ions
-  real(dp) :: ion_diffusion = 1e-4_dp
-
-  !> Secondary emission yield for ion impact
-  real(dp) :: secondary_emission_yield = 1.0e-2_dp
-
-  real(dp) :: photons_per_ionization = 1e-2_dp
-
-  !> Secondary emission yield for photons
-  real(dp) :: photon_emission_yield = 1.0e-5_dp
+  !> Maximum electric field for the transport data table
+  real(dp) :: fluid_max_efield
 
   !> Set density to zero below this value
-  real(dp) :: fluid_small_density = 1.0_dp
+  real(dp) :: fluid_small_density
+
+  ! Extrapolation coefficients for transport data
+  real(dp) :: extrap_src_dydx
+  real(dp) :: extrap_src_y0
+  real(dp) :: extrap_mob_c0
+  real(dp) :: extrap_mob_c1
 
   public :: fluid_initialize
   public :: fluid_advance
@@ -71,26 +65,39 @@ contains
     integer, parameter         :: name_len = 100
     character(len=200)         :: input_file
     integer                    :: n, table_size
-    real(dp)                   :: max_efield, xx
+    real(dp)                   :: xx, x(2), y(2)
     real(dp), allocatable      :: x_data(:), y_data(:)
     character(len=100)         :: data_name
     character(len=40)          :: integrator
 
-    input_file = "input/n2_transport_data_siglo.txt"
+    input_file          = "input/n2_transport_data_siglo.txt"
+    table_size          = 1000
+    integrator          = "rk2"
+    fluid_max_efield    = 2.5e7_dp
+    fluid_small_density = 1.0_dp
+
     call CFG_add_get(cfg, "fluid%input_file", input_file, &
          "Input file with cross sections")
-
-    table_size = 1000
     call CFG_add_get(cfg, "fluid%table_size", table_size, &
          "Size of lookup table for transport coefficients")
-
-    max_efield = 2.5e7
-    call CFG_add_get(cfg, "fluid%table_max_efield", max_efield, &
+    call CFG_add_get(cfg, "fluid%table_max_efield", fluid_max_efield, &
          "Maximum electric field in transport coefficient table")
-
-    integrator = "rk2"
+    call CFG_add_get(cfg, "fluid%small_density", fluid_small_density, &
+         "Smallest allowed density in the fluid model (1/m3)")
     call CFG_add_get(cfg, "fluid%integrator", integrator, &
          "Time integrator (euler, trapezoidal, rk2, rk4)")
+
+    call CFG_add(cfg, "fluid%fld_mob", "efield[V/m]_vs_mu[m2/Vs]", &
+         "The name of the mobility coefficient")
+    call CFG_add(cfg, "fluid%fld_dif", "efield[V/m]_vs_dif[m2/s]", &
+         "The name of the diffusion coefficient")
+    call CFG_add(cfg, "fluid%fld_alpha", "efield[V/m]_vs_alpha[1/m]", &
+         "The name of the eff. ionization coeff.")
+    call CFG_add(cfg, "fluid%fld_eta", "efield[V/m]_vs_eta[1/m]", &
+         "The name of the eff. attachment coeff.")
+
+    ! Exit here if the fluid model is not used
+    if (model_type /= model_fluid) return
 
     select case (integrator)
     case ("euler")
@@ -106,11 +113,6 @@ contains
        error stop
     end select
 
-    num_arrays = 3
-    iv_elec = 1
-    iv_pion = 2
-    iv_nion = 3
-
     n = n_ghost_cells
     allocate(fluid_state%a(1-n:domain_nx+n, num_arrays))
     allocate(fluid_state%s(num_scalars))
@@ -119,18 +121,7 @@ contains
     fluid_state%s(:)    = 0.0_dp
 
     ! Create a lookup table for the model coefficients
-    fluid_lkp_fld = LT_create(0.0_dp, max_efield, table_size, 0)
-
-    call CFG_add(cfg, "fluid%fld_mob", "efield[V/m]_vs_mu[m2/Vs]", &
-         "The name of the mobility coefficient")
-    call CFG_add(cfg, "fluid%fld_dif", "efield[V/m]_vs_dif[m2/s]", &
-         "The name of the diffusion coefficient")
-    call CFG_add(cfg, "fluid%fld_alpha", "efield[V/m]_vs_alpha[1/m]", &
-         "The name of the eff. ionization coeff.")
-    call CFG_add(cfg, "fluid%fld_eta", "efield[V/m]_vs_eta[1/m]", &
-         "The name of the eff. attachment coeff.")
-    ! call CFG_add(cfg, "fluid%fld_det", "efield[V/m]_vs_det[1/s]", &
-    !      "The name of the detachment rate coeff.")
+    fluid_lkp_fld = LT_create(0.0_dp, fluid_max_efield, table_size, 0)
 
     call CFG_get(cfg, "fluid%fld_mob", data_name)
     call TD_get_td_from_file(input_file, gas_name, &
@@ -155,15 +146,22 @@ contains
     call LT_add_col(fluid_lkp_fld, x_data, y_data)
     if_att = fluid_lkp_fld%n_cols
 
-    ! if (fluid_use_detach) then
-    !    call CFG_get(cfg, "fluid_fld_det", data_name)
-    !    call TD_get_td_from_file(input_file, gas_name, &
-    !         trim(data_name), x_data, y_data)
-    !    call LT_add_col(fluid_lkp_fld, x_data, y_data)
-    !    if_det= fluid_lkp_fld%n_cols
-    ! end if
-
     fluid_num_fld_coef = fluid_lkp_fld%n_cols
+
+    ! Determine extrapolation coefficients for transport data
+    x = [fluid_max_efield, 0.8_dp * fluid_max_efield]
+
+    ! Linear extrapolation for ionization coefficient
+    y = LT_get_col(fluid_lkp_fld, if_src, x)
+
+    extrap_src_dydx = (y(2) - y(1)) / (x(2) - x(1))
+    extrap_src_y0   = y(2)
+
+    ! Exponential decay for mobility: mu = c0 * exp(-c1 * E)
+    y = LT_get_col(fluid_lkp_fld, if_mob, x)
+
+    extrap_mob_c1 = -log(y(2)/y(1)) / (x(2) - x(1))
+    extrap_mob_c0 = y(2) / exp(-extrap_mob_c1 * x(2))
 
     ! Initialization of electron and ion density
     do n = 1, domain_nx
@@ -242,9 +240,18 @@ contains
 
     ! Get locations in the lookup table
     fld_locs(:) = LT_get_loc(fluid_lkp_fld, abs(field_fc))
-    mob_e = LT_get_col_at_loc(fluid_lkp_fld, if_mob, fld_locs)
+
+    ! Get coefficients
+    mob_e  = LT_get_col_at_loc(fluid_lkp_fld, if_mob, fld_locs)
     diff_e = LT_get_col_at_loc(fluid_lkp_fld, if_dif, fld_locs)
-    src_e = LT_get_col_at_loc(fluid_lkp_fld, if_src, fld_locs)
+    src_e  = LT_get_col_at_loc(fluid_lkp_fld, if_src, fld_locs)
+
+    ! Extrapolate the ionization coefficient, assuming the energy per ionization
+    ! remains constant
+    where (abs(field_fc) > fluid_max_efield)
+       src_e = extrap_src(abs(field_fc))
+       mob_e = extrap_mob(abs(field_fc))
+    end where
 
     ! Compute electron flux
     call get_flux_1d(state%a(:, iv_elec), -mob_e * field_fc, diff_e, &
@@ -275,14 +282,16 @@ contains
     derivs%s(i_lbound_elec) = -flux(1)
     derivs%s(i_rbound_elec) = flux(nx+1)
 
-    ! Photon fluxes on left and right sides
-    ! se = 0.5_dp * sum(source) * &
-    !      photons_per_ionization * photon_emission_yield
+    ! Photon fluxes on left and right sides. Assume photons are not absorbed and
+    ! have a 50% chance of going left/right.
+    if (se_photons_per_ionization > 0.0_dp) then
+       se = 0.5_dp * sum(source) * domain_dx * se_photons_per_ionization
 
-    ! derivs%a(1, iv_elec) = derivs%a(1, iv_elec) + se * domain_inv_dx
-    ! derivs%a(nx, iv_elec) = derivs%a(nx, iv_elec) + se * domain_inv_dx
-    ! derivs%s(i_lbound_elec) = derivs%s(i_lbound_elec) - se
-    ! derivs%s(i_rbound_elec) = derivs%s(i_lbound_elec) - se
+       derivs%a(1, iv_elec) = derivs%a(1, iv_elec) + se * domain_inv_dx
+       derivs%a(nx, iv_elec) = derivs%a(nx, iv_elec) + se * domain_inv_dx
+       derivs%s(i_lbound_elec) = derivs%s(i_lbound_elec) - se
+       derivs%s(i_rbound_elec) = derivs%s(i_lbound_elec) - se
+    end if
 
     ! Ion transport
     if (ion_transport) then
@@ -302,11 +311,11 @@ contains
        derivs%s(i_rbound_pion) = flux(nx+1)
 
        ! Secondary emission of electrons
-       se = -secondary_emission_yield * flux(1)
+       se = -ion_secondary_emission_yield * flux(1)
        derivs%a(1, iv_elec) = derivs%a(1, iv_elec) + se * domain_inv_dx
        derivs%s(i_lbound_elec) = derivs%s(i_lbound_elec) - se
 
-       se = secondary_emission_yield * flux(nx+1)
+       se = ion_secondary_emission_yield * flux(nx+1)
        derivs%a(nx, iv_elec) = derivs%a(nx, iv_elec) + se * domain_inv_dx
        derivs%s(i_rbound_elec) = derivs%s(i_rbound_elec) - se
     end if
@@ -336,7 +345,9 @@ contains
        ! 0.5 is emperical, to have good accuracy (and TVD/positivity) in
        ! combination with the explicit trapezoidal rule
        dt_max = min(0.5_dp * dt_cfl, 1/(1/dt_cfl + 1/dt_dif))
-       dt_max = min(dt_max, dt_drt)
+
+       ! Use a 'safety' factor of 0.9
+       dt_max = 0.9_dp * min(dt_max, dt_drt)
     end if
   end subroutine fluid_derivs
 
@@ -350,10 +361,10 @@ contains
     end do
   end subroutine set_stagg_source_1d
 
-  subroutine fluid_write_output(base_fname, time, ix)
+  subroutine fluid_write_output(base_fname, time, dt, ix)
     use m_units_constants
     character(len=*), intent(in) :: base_fname
-    real(dp), intent(in)         :: time
+    real(dp), intent(in)         :: time, dt
     integer, intent(in)          :: ix
     integer                      :: n, nx
     character(len=200)           :: fname
@@ -365,12 +376,13 @@ contains
     write(fname, "(A,A,I0.6,A)") trim(base_fname), "_fluid_", ix, ".txt"
     open(newunit=my_unit, file=trim(fname))
 
-    write(my_unit, "(A)") "x field electron pos_ion"
+    write(my_unit, "(A)") "x field electron pos_ion potential"
     do n = 1, domain_nx
-       write(my_unit, "(4e13.5)") domain_dx * (n-0.5_dp), &
+       write(my_unit, *) domain_dx * (n-0.5_dp), &
             field_cc(n), &
             fluid_state%a(n, iv_elec), &
-            fluid_state%a(n, iv_pion)
+            fluid_state%a(n, iv_pion), &
+            potential(n)
     end do
     close(my_unit)
 
@@ -379,7 +391,8 @@ contains
     write(fname, "(A,A,I0.6,A)") trim(base_fname), "_fluid_scalars.txt"
     if (ix == 1) then
        open(newunit=my_unit, file=trim(fname))
-       write(my_unit, *) "# Header TODO"
+       write(my_unit, *) "time dt max-field total-charge ", &
+            "sum_elec sum_pion sigma_l sigma_r max_elec max_pion"
     else
        open(newunit=my_unit, file=trim(fname), access='append')
     end if
@@ -389,8 +402,13 @@ contains
          - fluid_state%s(i_lbound_elec) - fluid_state%s(i_rbound_elec) &
          + fluid_state%s(i_lbound_pion) + fluid_state%s(i_rbound_pion)
 
-    write(my_unit, *) time, fluid_state%s(i_lbound_elec), &
-         fluid_state%s(i_rbound_elec), total_charge
+    write(my_unit, *) time, dt, maxval(abs(field_fc)), total_charge, &
+         domain_dx * sum(fluid_state%a(1:nx, iv_elec)), &
+         domain_dx * sum(fluid_state%a(1:nx, iv_pion)), &
+         fluid_state%s(i_lbound_pion) - fluid_state%s(i_lbound_elec), &
+         fluid_state%s(i_rbound_pion) - fluid_state%s(i_rbound_elec), &
+         maxval(fluid_state%a(1:nx, iv_elec)), &
+         maxval(fluid_state%a(1:nx, iv_pion))
     close(my_unit)
   end subroutine fluid_write_output
 
@@ -482,66 +500,14 @@ contains
     end where
   end subroutine fluid_advance
 
-  !> Compute advective and diffusive flux
-  subroutine get_flux_1d(cc, v, dc, dx, flux, nc, ngc)
-    integer, intent(in)   :: nc               !< Number of cells
-    integer, intent(in)   :: ngc              !< Number of ghost cells
-    real(dp), intent(in)  :: cc(1-ngc:nc+ngc) !< Cell-centered values
-    !> Input: velocities at cell faces
-    real(dp), intent(in)  :: v(1:nc+1)
-    !> Input: diffusion coefficients at cell faces
-    real(dp), intent(in)  :: dc(1:nc+1)
-    !> Grid spacing
-    real(dp), intent(in)  :: dx
-    !> Output: flux at cell faces
-    real(dp), intent(out) :: flux(1:nc+1)
-    real(dp)              :: gradp, gradc, gradn, inv_dx
-    integer               :: n
+  elemental real(dp) function extrap_src(fld)
+    real(dp), intent(in) :: fld
+    extrap_src = extrap_src_y0 + extrap_src_dydx * (fld - fluid_max_efield)
+  end function extrap_src
 
-    inv_dx = 1/dx
-
-    do n = 1, nc+1
-       gradc = cc(n) - cc(n-1)  ! Current gradient
-       if (v(n) < 0.0_dp) then
-          gradn = cc(n+1) - cc(n) ! Next gradient
-          flux(n) = v(n) * (cc(n) - koren_mlim(gradc, gradn))
-       else                     ! v(n) > 0
-          gradp = cc(n-1) - cc(n-2) ! Previous gradient
-          flux(n) = v(n) * (cc(n-1) + koren_mlim(gradc, gradp))
-       end if
-       ! Add diffusive flux (central differences)
-       flux(n) = flux(n) - dc(n) * gradc * inv_dx
-    end do
-
-  end subroutine get_flux_1d
-
-  !> Modified implementation of Koren limiter, to avoid division and the min/max
-  !> functions, which can be problematic / expensive. In most literature, you
-  !> have r = a / b (ratio of gradients). Then the limiter phi(r) is multiplied
-  !> with b. With this implementation, you get phi(r) * b
-  elemental function koren_mlim(a, b) result(bphi)
-    real(dp), intent(in) :: a  !< Density gradient (numerator)
-    real(dp), intent(in) :: b  !< Density gradient (denominator)
-    real(dp), parameter  :: sixth = 1/6.0_dp
-    real(dp)             :: bphi, aa, ab
-
-    aa = a * a
-    ab = a * b
-
-    if (ab <= 0) then
-       ! a and b have different sign or one of them is zero, so r is either 0,
-       ! inf or negative (special case a == b == 0 is ignored)
-       bphi = 0
-    else if (aa <= 0.25_dp * ab) then
-       ! 0 < a/b <= 1/4, limiter has value a/b
-       bphi = a
-    else if (aa <= 2.5_dp * ab) then
-       ! 1/4 < a/b <= 2.5, limiter has value (1+2*a/b)/6
-       bphi = sixth * (b + 2*a)
-    else
-       ! (1+2*a/b)/6 >= 1, limiter has value 1
-       bphi = b
-    end if
-  end function koren_mlim
+  elemental real(dp) function extrap_mob(fld)
+    real(dp), intent(in) :: fld
+    extrap_mob = extrap_mob_c0 * exp(-extrap_mob_c1 * fld)
+  end function extrap_mob
 
 end module m_fluid_1d

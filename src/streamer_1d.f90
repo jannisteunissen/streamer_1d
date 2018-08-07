@@ -52,7 +52,7 @@ program streamer_1d
   dt_min = 1e-13_dp
   call CFG_add_get(cfg, "dt%min", dt_max, "Minimal time step (s)")
 
-  output_name = "output/my_sim"
+  output_name = "output/sim"
   call CFG_add_get(cfg, "output%filename", output_name, &
        "Base file name for output")
 
@@ -86,7 +86,8 @@ program streamer_1d
 
      if (time_elapsed > 10 * info_cntr) then
         info_cntr = info_cntr + 1
-        write(*, "(F6.2,A)") 100.0_dp * time/end_time, "% complete"
+        write(*, "(F6.2,A,E9.2)") 100.0_dp * time/end_time, &
+             "% done, dt: ", dt_next
      end if
 
      dt = dt_next
@@ -99,17 +100,17 @@ program streamer_1d
 
      if (model_type == model_fluid) then
         call fluid_advance(dt, time, dt_limit)
-
         dt_next = get_new_dt(dt_next, dt_limit)
 
         if (write_output) then
-           call fluid_write_output(trim(output_name), time, output_ix)
+           call fluid_write_output(output_name, time, dt_next, output_ix)
         end if
      else
-        call particle_advance(dt, time)
+        call particle_advance(dt, time, dt_limit)
+        dt_next = get_new_dt(dt_next, dt_limit)
 
         if (write_output) then
-           call particle_write_output(trim(output_name), time, output_ix)
+           call particle_write_output(output_name, time, dt_next, output_ix)
         end if
      end if
 

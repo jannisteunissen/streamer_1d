@@ -1,15 +1,5 @@
-!> This webpage contains documentation for a 1d streamer simulation simulation code.
-!> It can simulate these 'ionization waves' or 1d streamer using either a particle or various fluid models.
-!>
-!> \section secLabel Usage overview
-!> Usage with the default configuration is easy: just type "make" to build the program and then execute
-!> "streamer_1d" with no arguments. If you want to execute the program with a configuration file,
-!> then use "streamer_1d [file]".
-!> Input files are located in the "input" directory. Output files are located in the "output" directory.
-!> The input file for the particle model contains cross sections.
-!> The input file for the fluid models contains transport data (mobility, diffusion, ionization rate etc.).
-!> The output files have the name and type of the simulation prepended (e.g., simName_type_000001.txt for the first one).
-!> They contain the following columns: position, electric field, electron density, ion density, mean energy and possibly more.
+!> Main program to simulate discharges in 1D, using either a particle or a fluid
+!> model
 program streamer_1d
   use m_config
   use m_generic
@@ -124,6 +114,7 @@ program streamer_1d
 
 contains
 
+  !> Check whether the output folder exists and is writable
   subroutine check_output_folder(filename)
     character(len=*), intent(in) :: filename
     integer                      :: my_unit, iostate
@@ -138,6 +129,7 @@ contains
     end if
   end subroutine check_output_folder
 
+  !> Get the next time step
   real(dp) function get_new_dt(dt, dt_limit)
     real(dp), intent(in) :: dt, dt_limit
 

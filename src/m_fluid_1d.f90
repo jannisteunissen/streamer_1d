@@ -27,6 +27,8 @@ module m_fluid_1d
   integer, parameter :: i_lbound_pion = 3
   integer, parameter :: i_rbound_pion = 4
 
+  logical :: fluid_limit_velocity = .false.
+
   integer :: if_mob, if_dif, if_src
   integer :: if_att, fluid_num_fld_coef
 
@@ -57,6 +59,7 @@ module m_fluid_1d
 
 contains
 
+  !> Initialize the fluid module
   subroutine fluid_initialize(cfg)
     use m_transport_data
     use m_config
@@ -95,6 +98,9 @@ contains
          "The name of the eff. ionization coeff.")
     call CFG_add(cfg, "fluid%fld_eta", "efield[V/m]_vs_eta[1/m]", &
          "The name of the eff. attachment coeff.")
+
+    call CFG_add_get(cfg, "fluid%limit_velocity", fluid_limit_velocity, &
+         "If true, keep the velocity constant for E > table_max_efield")
 
     ! Exit here if the fluid model is not used
     if (model_type /= model_fluid) return
@@ -197,11 +203,13 @@ contains
 
   end subroutine set_boundary_conditions
 
+  !> Compute the time derivatives of the fluid variables
   subroutine fluid_derivs(state, time, derivs, dt_max)
     use m_units_constants
-    type(state_t), intent(inout)    :: state
-    real(dp), intent(in)            :: time
-    type(state_t), intent(inout)    :: derivs
+    type(state_t), intent(inout)    :: state  !< Current state
+    real(dp), intent(in)            :: time   !< Current time
+    type(state_t), intent(inout)    :: derivs !< Derivatives
+    !> If present, output the maximal time step
     real(dp), intent(out), optional :: dt_max
 
     type(LT_loc_t), allocatable :: fld_locs(:)
@@ -258,7 +266,7 @@ contains
          domain_dx, flux, nx, n_ghost_cells)
 
     ! Compute source term per cell using the fluxes at cell faces
-    call set_stagg_source_1d(source, src_e * abs(flux))
+    call cell_face_to_center(source, src_e * abs(flux))
     derivs%a(1:nx, iv_elec) = source
     derivs%a(1:nx, iv_pion) = source
 
@@ -349,7 +357,9 @@ contains
     end if
   end subroutine fluid_derivs
 
-  subroutine set_stagg_source_1d(dens_c, src_f)
+  !> Average source terms defined at cell faces to get source terms at cell
+  !> centers
+  subroutine cell_face_to_center(dens_c, src_f)
     real(dp), intent(inout) :: dens_c(:)
     real(dp), intent(in)    :: src_f(:)
     integer                 :: n
@@ -357,8 +367,9 @@ contains
     do n = 1, size(dens_c)
        dens_c(n) = 0.5_dp * (src_f(n) + src_f(n+1))
     end do
-  end subroutine set_stagg_source_1d
+  end subroutine cell_face_to_center
 
+  !> Write output files
   subroutine fluid_write_output(base_fname, time, dt, ix)
     use m_units_constants
     character(len=*), intent(in) :: base_fname
@@ -511,15 +522,25 @@ contains
     end where
   end subroutine fluid_advance
 
+  !> Extrapolate the ionization coefficient
   elemental real(dp) function extrap_src(fld)
     real(dp), intent(in) :: fld
+    ! Linear extrapolation
     extrap_src = extrap_src_y0 + extrap_src_dydx * (fld - fluid_max_field)
   end function extrap_src
 
+  !> Extrapolate the mobility
   elemental real(dp) function extrap_mob(fld)
     real(dp), intent(in) :: fld
-    extrap_mob = extrap_mob_c0 * exp(-extrap_mob_c1 * fld)
-    ! extrap_mob = extrap_mob_c0 * exp(-extrap_mob_c1 * fluid_max_field) * fluid_max_field/fld
+
+    if (fluid_limit_velocity) then
+       ! Limit the maximal velocity (for testing purposes)
+       extrap_mob = extrap_mob_c0 * exp(-extrap_mob_c1 * fluid_max_field) * fluid_max_field/fld
+    else
+       ! Exponential decay
+       extrap_mob = extrap_mob_c0 * exp(-extrap_mob_c1 * fld)
+    end if
+
   end function extrap_mob
 
 end module m_fluid_1d

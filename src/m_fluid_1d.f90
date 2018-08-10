@@ -40,7 +40,7 @@ module m_fluid_1d
   type(LT_t) :: fluid_lkp_fld
 
   !> Maximum electric field for the transport data table
-  real(dp) :: fluid_max_efield
+  real(dp) :: fluid_max_field
 
   !> Set density to zero below this value
   real(dp) :: fluid_small_density
@@ -73,14 +73,14 @@ contains
     input_file          = "input/n2_transport_data_siglo.txt"
     table_size          = 1000
     integrator          = "rk2"
-    fluid_max_efield    = 2.5e7_dp
+    fluid_max_field     = 2.5e7_dp
     fluid_small_density = 1.0_dp
 
     call CFG_add_get(cfg, "fluid%input_file", input_file, &
          "Input file with cross sections")
     call CFG_add_get(cfg, "fluid%table_size", table_size, &
          "Size of lookup table for transport coefficients")
-    call CFG_add_get(cfg, "fluid%table_max_efield", fluid_max_efield, &
+    call CFG_add_get(cfg, "fluid%table_max_efield", fluid_max_field, &
          "Maximum electric field in transport coefficient table")
     call CFG_add_get(cfg, "fluid%small_density", fluid_small_density, &
          "Smallest allowed density in the fluid model (1/m3)")
@@ -121,7 +121,7 @@ contains
     fluid_state%s(:)    = 0.0_dp
 
     ! Create a lookup table for the model coefficients
-    fluid_lkp_fld = LT_create(0.0_dp, fluid_max_efield, table_size, 0)
+    fluid_lkp_fld = LT_create(0.0_dp, fluid_max_field, table_size, 0)
 
     call CFG_get(cfg, "fluid%fld_mob", data_name)
     call TD_get_td_from_file(input_file, gas_name, &
@@ -149,7 +149,7 @@ contains
     fluid_num_fld_coef = fluid_lkp_fld%n_cols
 
     ! Determine extrapolation coefficients for transport data
-    x = [fluid_max_efield, 0.8_dp * fluid_max_efield]
+    x = [fluid_max_field, 0.8_dp * fluid_max_field]
 
     ! Linear extrapolation for ionization coefficient
     y = LT_get_col(fluid_lkp_fld, if_src, x)
@@ -248,7 +248,7 @@ contains
 
     ! Extrapolate the ionization coefficient, assuming the energy per ionization
     ! remains constant
-    where (abs(field_fc) > fluid_max_efield)
+    where (abs(field_fc) > fluid_max_field)
        src_e = extrap_src(abs(field_fc))
        mob_e = extrap_mob(abs(field_fc))
     end where
@@ -261,17 +261,6 @@ contains
     call set_stagg_source_1d(source, src_e * abs(flux))
     derivs%a(1:nx, iv_elec) = source
     derivs%a(1:nx, iv_pion) = source
-
-    ! ~~~ Attachment source ~~~ TODO: try different formulations
-
-    ! Detachment process
-    ! if (fluid_use_detach) then
-    !    source(1) = 0
-    !    source(n_cc) = 0
-    !    source(2:n_cc-1) = (det_c(1:n_cc-2) + det_c(2:n_cc-1)) * 0.5_dp * state%a(2:n_cc-1, iv_nion)
-    !    time_derivs(:, iv_elec) = time_derivs(:, iv_elec) + source
-    !    time_derivs(:, iv_nion) = time_derivs(:, iv_nion) - source
-    ! end if
 
     do n = 1, nx
        derivs%a(n, iv_elec) = derivs%a(n, iv_elec) + &
@@ -287,10 +276,16 @@ contains
     if (se_photons_per_ionization > 0.0_dp) then
        se = 0.5_dp * sum(source) * domain_dx * se_photons_per_ionization
 
-       derivs%a(1, iv_elec) = derivs%a(1, iv_elec) + se * domain_inv_dx
-       derivs%a(nx, iv_elec) = derivs%a(nx, iv_elec) + se * domain_inv_dx
-       derivs%s(i_lbound_elec) = derivs%s(i_lbound_elec) - se
-       derivs%s(i_rbound_elec) = derivs%s(i_lbound_elec) - se
+       ! Electrons will only be released if the field points towards the surface
+       if (field_fc(1) < 0.0_dp) then
+          derivs%a(1, iv_elec) = derivs%a(1, iv_elec) + se * domain_inv_dx
+          derivs%s(i_lbound_elec) = derivs%s(i_lbound_elec) - se
+       end if
+
+       if (field_fc(nx+1) > 0.0_dp) then
+          derivs%a(nx, iv_elec) = derivs%a(nx, iv_elec) + se * domain_inv_dx
+          derivs%s(i_rbound_elec) = derivs%s(i_rbound_elec) - se
+       end if
     end if
 
     ! Ion transport
@@ -318,6 +313,9 @@ contains
        se = ion_secondary_emission_yield * flux(nx+1)
        derivs%a(nx, iv_elec) = derivs%a(nx, iv_elec) + se * domain_inv_dx
        derivs%s(i_rbound_elec) = derivs%s(i_rbound_elec) - se
+    else
+       diff_i(:) = 0.0_dp
+       mob_i(:)  = 0.0_dp
     end if
 
     if (present(dt_max)) then
@@ -369,6 +367,8 @@ contains
     integer                      :: n, nx
     character(len=200)           :: fname
     real(dp)                     :: total_charge
+    real(dp)                     :: max_field, deriv_max_field
+    real(dp), save               :: prev_max_field, prev_time
     integer                      :: my_unit
 
     nx = domain_nx
@@ -391,8 +391,8 @@ contains
     write(fname, "(A,A,I0.6,A)") trim(base_fname), "_fluid_scalars.txt"
     if (ix == 1) then
        open(newunit=my_unit, file=trim(fname))
-       write(my_unit, *) "time dt max-field total-charge ", &
-            "sum_elec sum_pion sigma_l sigma_r max_elec max_pion"
+       write(my_unit, *) "time dt E_max total_charge sum_elec ", &
+            "sum_pion sigma_l sigma_r max_elec max_pion deriv_Emax"
     else
        open(newunit=my_unit, file=trim(fname), access='append')
     end if
@@ -402,14 +402,25 @@ contains
          - fluid_state%s(i_lbound_elec) - fluid_state%s(i_rbound_elec) &
          + fluid_state%s(i_lbound_pion) + fluid_state%s(i_rbound_pion)
 
-    write(my_unit, *) time, dt, maxval(abs(field_fc)), total_charge, &
+    max_field = maxval(abs(field_fc))
+
+    if (ix == 1) then
+       deriv_max_field = 0.0_dp
+    else
+       deriv_max_field = (max_field - prev_max_field) / (time - prev_time)
+    end if
+
+    write(my_unit, *) time, dt, max_field, total_charge, &
          domain_dx * sum(fluid_state%a(1:nx, iv_elec)), &
          domain_dx * sum(fluid_state%a(1:nx, iv_pion)), &
          fluid_state%s(i_lbound_pion) - fluid_state%s(i_lbound_elec), &
          fluid_state%s(i_rbound_pion) - fluid_state%s(i_rbound_elec), &
          maxval(fluid_state%a(1:nx, iv_elec)), &
-         maxval(fluid_state%a(1:nx, iv_pion))
+         maxval(fluid_state%a(1:nx, iv_pion)), deriv_max_field
     close(my_unit)
+
+    prev_max_field = max_field
+    prev_time      = time
   end subroutine fluid_write_output
 
   subroutine fluid_advance(dt, time, max_dt)
@@ -502,12 +513,13 @@ contains
 
   elemental real(dp) function extrap_src(fld)
     real(dp), intent(in) :: fld
-    extrap_src = extrap_src_y0 + extrap_src_dydx * (fld - fluid_max_efield)
+    extrap_src = extrap_src_y0 + extrap_src_dydx * (fld - fluid_max_field)
   end function extrap_src
 
   elemental real(dp) function extrap_mob(fld)
     real(dp), intent(in) :: fld
     extrap_mob = extrap_mob_c0 * exp(-extrap_mob_c1 * fld)
+    ! extrap_mob = extrap_mob_c0 * exp(-extrap_mob_c1 * fluid_max_field) * fluid_max_field/fld
   end function extrap_mob
 
 end module m_fluid_1d

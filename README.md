@@ -1,9 +1,8 @@
-Streamer_1d
+streamer_1d
 ==
 
-This is code for 1d streamer simulations with a particle-in-cell or fluid model.
-Currently, fluid models can use the local field approximation or the local
-energy approximation.
+This is code for 1D discharge simulations with a particle-in-cell or fluid
+model.
 
 Getting the code:
 
@@ -16,54 +15,45 @@ Compiling the code:
 
 Running the code:
 
-    $ ./streamer_1d cfg_example_1.txt
-    $ ./streamer_1d cfg_example_2.txt
+    $ ./streamer_1d example_N2.cfg
+    $ ./streamer_1d example_Ar.cfg
 
 Options are specified in the configuration files that are passed as argument.
 You can also specify multiple configuration files, like:
 
-    $ ./streamer_1d cfg_example_1.txt my_other_options.txt
+    $ ./streamer_1d a.cfg b.cfg
 
-The later files will then override earlier options. In each configuration file,
-you can specify a different "sim_name" variable. These names will be appended to
-each other for the output.
+The later files will then override earlier options. Individual parameters can be
+also be passed:
+
+    $ ./streamer_1d example_N2.cfg -end%time=1e-9
 
 Program options
 ==
 
-Please have a look at the provided example configuration files.
+Please have a look at the provided example configuration files for all the settings.
 
 Program output
 ==
 
-Output files are stored in the "output" directory. The filename consists of several parts:
+Output files are stored in the "output" directory. The file names consists of several parts:
 
-    [sim_name]_[model_name]_[number].txt
+    [output]_[model_name]_[number].txt
 
-So if sim_name is "test", and you use a particle model, then the first output will be
+So if `output%filename` is "output/test", and you use a particle model, then the first output will be
 
-    test_p_1.txt
+    test_particle_000001.txt
 
-For the fluid model with the local field approximation "fl" is added, and for
-the fluid model with the energy equation "flee" is added. The columns in these files specify the:
+For the fluid model with the local field approximation "fluid" is added. The files contain a header that describes what they store. For fluid simulations, the columns are:
 
 1. position (m)
 2. electric field (V/m)
 3. electron density (1/m3)
 4. positive ion density (1/m3)
-5. negative ion density (1/m3)
-6. energy density (eV/m3)
-7. mean energy (eV)
+5. potential (V)
 
-(This information is also listed in the header of the output files.)
-
-For example, to plot the electron density with **gnuplot**:
+To plot the electron density with **gnuplot**:
 
     gnuplot
-    plot "test_part_1.txt" u 1:3
+    plot "output/example1_fluid_000001.txt" u 1:3
 
-
-Todo
-==
-
-* Add example transport data for energy equation model

@@ -61,7 +61,7 @@ contains
     real(dp)                :: elec_dens, ion_dens
     real(dp)                :: pos(3), vel(3), accel(3), max_eV
 
-    cs_file             = "input/n2_cross_sections_siglo.txt"
+    cs_file             = "input/cross_sections_siglo.txt"
     max_eV              = 1e3_dp
     n_part_init         = 10*1000
     n_part_max          = 10*1000*1000
@@ -87,8 +87,8 @@ contains
     call CFG_add_get(cfg, "particle%max_eV", max_eV, &
          "Maximum energy (eV) for particles")
     call CFG_add_get(cfg, "particle%initial_number", n_part_init, &
-         "The number of initial simulation particles")
-    call CFG_add_get(cfg, "particle%_max_number", n_part_max, &
+         "Min. number of initial simulation particles")
+    call CFG_add_get(cfg, "particle%max_number", n_part_max, &
          "The maximum number of particles")
     call CFG_add_get(cfg, "particle%part_per_cell", PM_part_per_cell, &
          "The desired number of particles per cell")
@@ -471,21 +471,27 @@ contains
        x(2:3) = 0.0_dp
        a(:)   = get_accel(x(1))
 
-       do n = 1, n_se_photons
-          ! Create on lower boundary
-          PM_scalars(i_lbound_elec) = PM_scalars(i_lbound_elec) - &
-               w / PM_transverse_area
-          call pc%create_part(x, v, a, w, 0.0_dp)
-       end do
+       ! Electrons will only be released if the field points towards the surface
+       if (a(1) > 0.0_dp) then
+          do n = 1, n_se_photons
+             ! Create on lower boundary
+             PM_scalars(i_lbound_elec) = PM_scalars(i_lbound_elec) - &
+                  w / PM_transverse_area
+             call pc%create_part(x, v, a, w, 0.0_dp)
+          end do
+       end if
 
        x(1) = domain_length - 0.1_dp * domain_dx
        a(:)   = get_accel(x(1))
-       do n = 1, n_se_photons
-          ! Create on upper boundary
-          PM_scalars(i_rbound_elec) = PM_scalars(i_rbound_elec) - &
-               w / PM_transverse_area
-          call pc%create_part(x, v, a, w, 0.0_dp)
-       end do
+
+       if (a(1) < 0.0_dp) then
+          do n = 1, n_se_photons
+             ! Create on upper boundary
+             PM_scalars(i_rbound_elec) = PM_scalars(i_rbound_elec) - &
+                  w / PM_transverse_area
+             call pc%create_part(x, v, a, w, 0.0_dp)
+          end do
+       end if
     end if
 
   end subroutine handle_events
@@ -575,13 +581,14 @@ contains
     real(dp), intent(in)                 :: field_range(2)
     integer, intent(in)                  :: n_bins
     integer                              :: ix
-    real(dp)                             :: fac, accel_range(2)
+    real(dp)                             :: fac, delta_en
+    real(dp)                             :: accel_range(2)
 
     allocate(eedf(2, n_bins))
 
     ! Set centers of the bins
     do ix = 1, n_bins
-       fac = (ix-0.5_dp) / n_bins
+       fac = (ix - 0.5_dp) / n_bins
        eedf(1, ix) = energy_range(1) + &
             fac * (energy_range(2) - energy_range(1))
     end do
@@ -594,7 +601,8 @@ contains
          accel_range, eedf(1,:), eedf(2,:))
 
     ! Normalize
-    eedf(2, :) = eedf(2, :) / sum(eedf(2, :))
+    delta_en = (energy_range(2) - energy_range(1)) / n_bins
+    eedf(2, :) = eedf(2, :) / (sum(eedf(2, :)) * delta_en)
 
     ! Convert to energy range
     eedf(1, :) = eedf(1, :) * 0.5_dp * pc%get_mass() / UC_elec_volt

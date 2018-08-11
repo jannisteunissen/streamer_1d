@@ -14,14 +14,28 @@ module m_generic
   integer, parameter :: model_particle = 2
   integer, protected :: model_type     = 1
 
+  !> Length of domain
   real(dp), protected :: domain_length = 2.0e-3_dp
-  integer, protected  :: domain_nx     = 500
-  real(dp), protected :: domain_dx     = 2e-6_dp
-  real(dp), protected :: domain_inv_dx = 5e5_dp
 
+  !> Number of grid cells
+  integer, protected  :: domain_nx     = 500
+
+  !> Grid spacing
+  real(dp), protected :: domain_dx
+
+  !> Inverse grid spacing
+  real(dp), protected :: domain_inv_dx
+
+  !> Voltage (V) on right domain boundary (left is grounded)
   real(dp), protected :: voltage_v0       = -2e4_dp
+
+  !> Voltage rise time (s)
   real(dp), protected :: voltage_risetime = 0.0_dp
+
+  !> Amplitude of sinusoidal voltage (V)
   real(dp), protected :: voltage_sin_v0   = 0.0_dp
+
+  !> Frequency (1/s) of sinusoidal voltage
   real(dp), protected :: voltage_sin_freq = 1.0e8_dp
 
   !> Whether a dielectric is present on the left and right
@@ -69,14 +83,9 @@ module m_generic
   !> Number of secondary-emission generating photons per ionization
   real(dp), protected :: se_photons_per_ionization = 0.0_dp
 
-  public :: generic_initialize
-  public :: compute_field
-  public :: get_field_at
-
-  public :: get_flux_1d
-
 contains
 
+  !> Initialize the parameters
   subroutine generic_initialize(cfg)
     use m_config
     use m_units_constants
@@ -159,6 +168,7 @@ contains
 
   end subroutine generic_initialize
 
+  !> Compute the electric field and store it
   subroutine compute_field(net_charge, surface_charge, time)
     use m_units_constants
     real(dp), intent(in) :: net_charge(:)
@@ -220,6 +230,7 @@ contains
 
   end subroutine compute_field
 
+  !> Get the potential at the current time
   function get_potential(time) result(pot)
     real(dp), intent(in) :: time
     real(dp)             :: pot, rise_factor

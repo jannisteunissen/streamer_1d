@@ -29,8 +29,12 @@ module m_fluid_1d
 
   logical :: fluid_limit_velocity = .false.
 
-  integer :: if_mob, if_dif, if_src
-  integer :: if_att, fluid_num_fld_coef
+  ! Indices for the transport coefficients
+  integer :: ix_mob             = -1   ! Mobility
+  integer :: ix_diff            = -1  ! Diffusion
+  integer :: ix_alpha           = -1 ! Ionization
+  integer :: ix_eta             = -1   ! Attachment
+  integer :: fluid_num_fld_coef = -1
 
   type state_t
      real(dp), allocatable :: a(:, :) ! arrays
@@ -42,10 +46,10 @@ module m_fluid_1d
   type(LT_t) :: fluid_lkp_fld
 
   !> Maximum electric field for the transport data table
-  real(dp) :: fluid_max_field
+  real(dp) :: fluid_max_field = 2.5e7_dp
 
   !> Set density to zero below this value
-  real(dp) :: fluid_small_density
+  real(dp) :: fluid_small_density = 1.0_dp
 
   ! Extrapolation coefficients for transport data
   real(dp) :: extrap_src_dydx
@@ -72,12 +76,11 @@ contains
     real(dp), allocatable      :: x_data(:), y_data(:)
     character(len=100)         :: data_name
     character(len=40)          :: integrator
+    logical                    :: found
 
     input_file          = "input/n2_transport_data_siglo.txt"
     table_size          = 1000
     integrator          = "rk2"
-    fluid_max_field     = 2.5e7_dp
-    fluid_small_density = 1.0_dp
 
     call CFG_add_get(cfg, "fluid%input_file", input_file, &
          "Input file with cross sections")
@@ -133,24 +136,27 @@ contains
     call TD_get_td_from_file(input_file, gas_name, &
          trim(data_name), x_data, y_data)
     call LT_add_col(fluid_lkp_fld, x_data, y_data)
-    if_mob = fluid_lkp_fld%n_cols
+    ix_mob = fluid_lkp_fld%n_cols
 
     call CFG_get(cfg, "fluid%fld_dif", data_name)
     call TD_get_td_from_file(input_file, gas_name, &
          trim(data_name), x_data, y_data)
     call LT_add_col(fluid_lkp_fld, x_data, y_data)
-    if_dif = fluid_lkp_fld%n_cols
+    ix_diff = fluid_lkp_fld%n_cols
 
     call CFG_get(cfg, "fluid%fld_alpha", data_name)
     call TD_get_td_from_file(input_file, gas_name, &
          trim(data_name), x_data, y_data)
     call LT_add_col(fluid_lkp_fld, x_data, y_data)
-    if_src = fluid_lkp_fld%n_cols
+    ix_alpha = fluid_lkp_fld%n_cols
+
     call CFG_get(cfg, "fluid%fld_eta", data_name)
     call TD_get_td_from_file(input_file, gas_name, &
-         trim(data_name), x_data, y_data)
-    call LT_add_col(fluid_lkp_fld, x_data, y_data)
-    if_att = fluid_lkp_fld%n_cols
+         trim(data_name), x_data, y_data, found)
+    if (found) then
+       call LT_add_col(fluid_lkp_fld, x_data, y_data)
+       ix_eta = fluid_lkp_fld%n_cols
+    end if
 
     fluid_num_fld_coef = fluid_lkp_fld%n_cols
 
@@ -158,13 +164,13 @@ contains
     x = [fluid_max_field, 0.8_dp * fluid_max_field]
 
     ! Linear extrapolation for ionization coefficient
-    y = LT_get_col(fluid_lkp_fld, if_src, x)
+    y = LT_get_col(fluid_lkp_fld, ix_alpha, x)
 
     extrap_src_dydx = (y(2) - y(1)) / (x(2) - x(1))
     extrap_src_y0   = y(2)
 
     ! Exponential decay for mobility: mu = c0 * exp(-c1 * E)
-    y = LT_get_col(fluid_lkp_fld, if_mob, x)
+    y = LT_get_col(fluid_lkp_fld, ix_mob, x)
 
     extrap_mob_c1 = -log(y(2)/y(1)) / (x(2) - x(1))
     extrap_mob_c0 = y(2) / exp(-extrap_mob_c1 * x(2))
@@ -179,6 +185,8 @@ contains
 
   end subroutine fluid_initialize
 
+  !> Fill the ghost cells of the fluid variables
+  !> TODO: implement this more flexibly
   subroutine set_boundary_conditions(state)
     type(state_t), intent(inout) :: state
 
@@ -250,9 +258,14 @@ contains
     fld_locs(:) = LT_get_loc(fluid_lkp_fld, abs(field_fc))
 
     ! Get coefficients
-    mob_e  = LT_get_col_at_loc(fluid_lkp_fld, if_mob, fld_locs)
-    diff_e = LT_get_col_at_loc(fluid_lkp_fld, if_dif, fld_locs)
-    src_e  = LT_get_col_at_loc(fluid_lkp_fld, if_src, fld_locs)
+    mob_e  = LT_get_col_at_loc(fluid_lkp_fld, ix_mob, fld_locs)
+    diff_e = LT_get_col_at_loc(fluid_lkp_fld, ix_diff, fld_locs)
+    src_e  = LT_get_col_at_loc(fluid_lkp_fld, ix_alpha, fld_locs)
+
+    ! Remove attachment coefficient from source
+    if (ix_eta > 0) then
+       src_e = src_e - LT_get_col_at_loc(fluid_lkp_fld, ix_eta, fld_locs)
+    end if
 
     ! Extrapolate the ionization coefficient, assuming the energy per ionization
     ! remains constant
@@ -434,6 +447,7 @@ contains
     prev_time      = time
   end subroutine fluid_write_output
 
+  !> Advance the fluid state over dt
   subroutine fluid_advance(dt, time, max_dt)
     real(dp), intent(in)  :: dt
     real(dp), intent(in)  :: time

@@ -9,43 +9,33 @@ program streamer_1d
   implicit none
 
   integer, parameter :: dp = kind(0.0d0)
-  character(len=200) :: output_name
 
-  integer :: it, end_iteration
-  integer :: output_ix
-  integer :: info_cntr
+  character(len=200) :: output_name   = "output/sim"
+  integer            :: it            = 0
+  integer            :: output_ix     = 0
+  integer            :: info_cntr     = 1
+  integer            :: end_iteration = huge(1)
+  real(dp)           :: time          = 0.0_dp
+  real(dp)           :: end_time      = 3.0e-9_dp
+  real(dp)           :: dt_next       = 1e-12_dp
+  real(dp)           :: dt_max        = 1e-11_dp
+  real(dp)           :: dt_min        = 1e-13_dp
+  real(dp)           :: dt_output     = 1.0e-10_dp
 
-  real(dp) :: time, end_time
-  real(dp) :: dt, dt_next, dt_max, dt_min, dt_limit
-  real(dp) :: dt_output
-  real(dp) :: time_elapsed
-  integer  :: time_now, time_start, count_rate
-
-  logical     :: write_output
-  type(CFG_t) :: cfg
+  real(dp)           :: dt, dt_limit
+  real(dp)           :: time_elapsed
+  integer            :: time_now, time_start, count_rate
+  logical            :: write_output
+  type(CFG_t)        :: cfg
 
   call CFG_update_from_arguments(cfg)
-
-  end_time = 3.0e-9_dp
   call CFG_add_get(cfg, "end%time", end_time, "End time (s)")
-
-  end_iteration = huge(1)
   call CFG_add_get(cfg, "end%iteration", end_iteration, "End iteration")
-
-  dt_next = 1e-12_dp
   call CFG_add_get(cfg, "dt%initial", dt_next, "Initial time step (s)")
-
-  dt_max = 1e-11_dp
   call CFG_add_get(cfg, "dt%max", dt_max, "Maximal time step (s)")
-
-  dt_min = 1e-13_dp
-  call CFG_add_get(cfg, "dt%min", dt_max, "Minimal time step (s)")
-
-  output_name = "output/sim"
+  call CFG_add_get(cfg, "dt%min", dt_min, "Minimal time step (s)")
   call CFG_add_get(cfg, "output%filename", output_name, &
        "Base file name for output")
-
-  dt_output = 1.0e-10_dp
   call CFG_add_get(cfg, "output%dt", dt_output, &
          "The time step for writing output")
 
@@ -53,19 +43,14 @@ program streamer_1d
   call fluid_initialize(cfg)
   call particle_initialize(cfg)
 
-  call check_output_folder(trim(output_name))
+  call check_file_writable(trim(output_name))
 
+  ! Store the simulation settings used for this run
   if (model_type == model_particle) then
      call CFG_write(cfg, trim(output_name) // "_particle.cfg", .true.)
   else
      call CFG_write(cfg, trim(output_name) // "_fluid.cfg", .true.)
   end if
-
-  ! Initialize variables
-  time      = 0.0_dp
-  output_ix = 0
-  info_cntr = 1
-  it        = 0
 
   call system_clock(time_start, count_rate)
 
@@ -115,7 +100,7 @@ program streamer_1d
 contains
 
   !> Check whether the output folder exists and is writable
-  subroutine check_output_folder(filename)
+  subroutine check_file_writable(filename)
     character(len=*), intent(in) :: filename
     integer                      :: my_unit, iostate
 
@@ -127,7 +112,7 @@ contains
     else
        close(my_unit, status='delete')
     end if
-  end subroutine check_output_folder
+  end subroutine check_file_writable
 
   !> Get the next time step
   real(dp) function get_new_dt(dt, dt_limit)

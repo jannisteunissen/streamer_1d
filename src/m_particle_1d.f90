@@ -1,3 +1,4 @@
+!> Module for 1D particle simulations, making use of the particle_core routines
 module m_particle_1d
   use m_generic
   use m_particle_core
@@ -24,18 +25,30 @@ module m_particle_1d
   real(dp), allocatable :: PM_vars(:, :)
   real(dp), allocatable :: PM_scalars(:)
 
+  !> Transverse area of the 1D domain (automatically determined)
   real(dp) :: PM_transverse_area
-  real(dp) :: PM_grid_volume, PM_inv_grid_volume
-  real(dp) :: PM_part_per_cell, PM_v_merge_weight
-  real(dp) :: merge_factor
-  real(dp) :: merge_prev_npart
-  real(dp) :: PM_max_mobility_drt
+  !> Volume of a grid cell
+  real(dp) :: PM_cell_volume
+  !> Inverse volume of a grid cell
+  real(dp) :: PM_inv_cell_volume
 
+  !> Goal number of particles per cell
+  real(dp) :: PM_part_per_cell = 1.0e2_dp
+
+  !> Weight factor for velocity when merging particles
+  real(dp) :: PM_v_merge_weight = 1.0e-12_dp
+
+  !> Adapt weights when particle number changes by this factor
+  real(dp) :: PM_merge_factor = 1.1_dp
+
+  !> Maximal mobility to estimate dielectric relaxation time
+  real(dp) :: PM_max_mobility_drt = 0.2_dp
+
+  real(dp)                       :: merge_prev_npart
   character(len=10), allocatable :: gas_components(:)
   real(dp), allocatable          :: gas_fractions(:)
-
-  type(PC_t)        :: pc
-  type(PC_events_t) :: events
+  type(PC_t)                     :: pc
+  type(PC_events_t)              :: events
 
   ! Public routines
   public :: particle_initialize
@@ -44,6 +57,7 @@ module m_particle_1d
 
 contains
 
+  !> Initialize particle module
   subroutine particle_initialize(cfg)
     use m_config
     use m_random
@@ -65,11 +79,7 @@ contains
     max_eV              = 1e3_dp
     n_part_init         = 10*1000
     n_part_max          = 10*1000*1000
-    PM_part_per_cell    = 1.0e2_dp
-    PM_v_merge_weight   = 1.0e-12_dp
-    merge_factor        = 1.1_dp
     tbl_size            = 1000
-    PM_max_mobility_drt = 0.2_dp
 
     call CFG_add(cfg, "gas%components", ["N2"], &
          "Gas components", .true.)
@@ -95,7 +105,7 @@ contains
     call CFG_add_get(cfg, "particle%v_merge_weight", PM_v_merge_weight, &
          "Velocity weight factor (s) for particle merging")
     call CFG_add_get(cfg, "particle%merge_increase_factor", &
-         merge_factor, &
+         PM_merge_factor, &
          "Adapt weights if particle count increases by this factor")
     call CFG_add_get(cfg, "particle%table_size", tbl_size, &
          "Size of the lookup table for collision rates")
@@ -125,10 +135,10 @@ contains
     if (sum_elec_dens < epsilon(1.0_dp)) &
          error stop "Initial electron density seems to be zero!"
 
-    PM_grid_volume     = max(n_part_init / sum_elec_dens, &
+    PM_cell_volume     = max(n_part_init / sum_elec_dens, &
          PM_part_per_cell / max_elec_dens)
-    PM_transverse_area = PM_grid_volume / domain_dx
-    PM_inv_grid_volume = 1 / PM_grid_volume
+    PM_transverse_area = PM_cell_volume / domain_dx
+    PM_inv_cell_volume = 1 / PM_cell_volume
 
     allocate(PM_vars(-1:domain_nx+2, PM_num_vars))
     PM_vars(:, :) = 0.0_dp
@@ -151,7 +161,7 @@ contains
        elec_dens = init_elec_dens(x)
        ion_dens  = init_pos_ion_dens(x)
 
-       num_part = nint(elec_dens * PM_grid_volume)
+       num_part = nint(elec_dens * PM_cell_volume)
 
        ! Uniform position in the cell
        pos(2:3) = [0.0_dp, 0.0_dp]
@@ -164,7 +174,7 @@ contains
           call pc%create_part(pos, vel, accel, 1.0_dp, 0.0_dp)
        end do
 
-       pm_vars(n, iv_pion) = num_part / PM_grid_volume
+       pm_vars(n, iv_pion) = num_part / PM_cell_volume
     end do
 
     call PM_update_efield(0.0_dp)
@@ -200,7 +210,7 @@ contains
     ! Coefficient for upper point between 0 and 1
     tmp    = low_ix - tmp
 
-    dens_dif = amount * PM_inv_grid_volume
+    dens_dif = amount * PM_inv_cell_volume
 
     if (low_ix < 0 .or. low_ix > domain_nx) then
        error stop "a particle is outside the computational domain"
@@ -223,7 +233,7 @@ contains
 
   subroutine add_particle_to_count(my_part)
     type(PC_part_t), intent(in) :: my_part
-    call add_to_dens_cic(PM_grid_volume, my_part%x(1), iv_ppc)
+    call add_to_dens_cic(PM_cell_volume, my_part%x(1), iv_ppc)
   end subroutine add_particle_to_count
 
   subroutine add_elec_en_to_dens(my_part)
@@ -303,7 +313,7 @@ contains
     ix = maxloc(tmp)
     field_change = tmp(ix(1))
 
-    if (n_out > merge_factor * merge_prev_npart) then
+    if (n_out > PM_merge_factor * merge_prev_npart) then
        call pc%merge_and_split([.true., .false., .false.], &
          PM_v_merge_weight, .true., get_desired_weight, &
          domain_dx, PC_merge_part_rxv, PC_split_part)
@@ -503,7 +513,7 @@ contains
 
     ix = floor(my_part%x(1) * domain_inv_dx) + 1
     elec_dens = PM_vars(ix, iv_elec)
-    get_desired_weight = elec_dens * PM_grid_volume / PM_part_per_cell
+    get_desired_weight = elec_dens * PM_cell_volume / PM_part_per_cell
     get_desired_weight = max(1.0_dp, get_desired_weight)
   end function get_desired_weight
 

@@ -15,8 +15,8 @@ Compiling the code:
 
 Running the code:
 
-    $ ./streamer_1d example_N2.cfg
-    $ ./streamer_1d example_Ar.cfg
+    $ ./streamer_1d example_1.cfg
+    $ ./streamer_1d example_2.cfg
 
 Options are specified in the configuration files that are passed as argument.
 You can also specify multiple configuration files, like:
@@ -26,7 +26,7 @@ You can also specify multiple configuration files, like:
 The later files will then override earlier options. Individual parameters can be
 also be passed:
 
-    $ ./streamer_1d example_N2.cfg -end%time=1e-9
+    $ ./streamer_1d example_1.cfg -end%time=1e-9
 
 Program options
 ==
@@ -52,7 +52,7 @@ For the fluid model with the local field approximation "fluid" is added. The fil
 4. positive ion density (1/m3)
 5. potential (V)
 
-To plot the electron density with **gnuplot**:
+To for example plot the electron density with **gnuplot**:
 
     gnuplot
     plot "output/example1_fluid_000001.txt" u 1:3

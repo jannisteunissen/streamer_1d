@@ -44,6 +44,12 @@ module m_particle_1d
   !> Maximal mobility to estimate dielectric relaxation time
   real(dp) :: PM_max_mobility_drt = 0.2_dp
 
+  !> Maximum energy for eedf (eV)
+  real(dp) :: PM_eedf_max_eV = 20.0_dp
+
+  !> Number of points for eedf
+  integer :: PM_eedf_npoints = 100
+
   real(dp)                       :: merge_prev_npart
   character(len=10), allocatable :: gas_components(:)
   real(dp), allocatable          :: gas_fractions(:)
@@ -111,6 +117,11 @@ contains
          "Size of the lookup table for collision rates")
     call CFG_add_get(cfg, "particle%max_mobility_drt", PM_max_mobility_drt, &
          "Maximum mobility to estimate dielectric relaxation time")
+
+    call CFG_add_get(cfg, "particle%eedf_max_eV", PM_eedf_max_eV, &
+         "Maximum energy for eedf (eV)")
+    call CFG_add_get(cfg, "particle%eedf_npoints", PM_eedf_npoints, &
+         "Number of points for eedf")
 
     ! Exit here if we don't use the particle model
     if (model_type /= model_particle) return
@@ -563,7 +574,8 @@ contains
          ix, ".txt"
     open(newunit=my_unit, file=trim(fname))
     write(my_unit, *) "energy(eV) count"
-    call get_eedf(eedf, [0.0_dp, 1e2_dp], [0.0_dp, 1e8_dp], 100)
+    call get_eedf(eedf, [0.0_dp, PM_eedf_max_eV], &
+         [0.0_dp, 1e8_dp], PM_eedf_npoints)
     do n = 1, size(eedf, 2)
        write(my_unit, *) eedf(:, n)
     end do

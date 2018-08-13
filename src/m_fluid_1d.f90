@@ -327,11 +327,11 @@ contains
        derivs%s(i_rbound_pion) = flux(nx+1)
 
        ! Secondary emission of electrons
-       se = -ion_secondary_emission_yield * flux(1)
+       se = max(0.0_dp, -ion_secondary_emission_yield * flux(1))
        derivs%a(1, iv_elec) = derivs%a(1, iv_elec) + se * domain_inv_dx
        derivs%s(i_lbound_elec) = derivs%s(i_lbound_elec) - se
 
-       se = ion_secondary_emission_yield * flux(nx+1)
+       se = max(0.0_dp, ion_secondary_emission_yield * flux(nx+1))
        derivs%a(nx, iv_elec) = derivs%a(nx, iv_elec) + se * domain_inv_dx
        derivs%s(i_rbound_elec) = derivs%s(i_rbound_elec) - se
     else

@@ -368,7 +368,7 @@ contains
          + flux(nx+1) * dt
 
     ! Secondary emission of electrons on lower boundary
-    se = -ion_secondary_emission_yield * flux(1) * dt
+    se = max(0.0_dp, -ion_secondary_emission_yield * flux(1) * dt)
     n_elec = random_round(se * PM_transverse_area)
 
     ! Create at most PM_part_per_cell electrons
@@ -392,7 +392,7 @@ contains
          - n_elec * w / PM_transverse_area
 
     ! Secondary emission of electrons on upper boundary
-    se = ion_secondary_emission_yield * flux(nx+1) * dt
+    se = max(0.0_dp, ion_secondary_emission_yield * flux(nx+1) * dt)
     n_elec = random_round(se * PM_transverse_area)
 
     if (n_elec > PM_part_per_cell) then

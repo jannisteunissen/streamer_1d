@@ -285,10 +285,9 @@ contains
     real(dp), intent(in)  :: dt
     real(dp), intent(in)  :: time
     real(dp), intent(out) :: dt_limit
-    integer               :: n_in, n_out, ix(1)
-    real(dp)              :: field_change, vmax, sigma
+    integer               :: n_in, n_out
+    real(dp)              :: vmax, sigma
     real(dp)              :: dt_cfl, dt_drt
-    real(dp), allocatable :: tmp(:)
     real(dp), parameter   :: eps = 1e-100_dp
 
     n_in = pc%get_num_sim_part()
@@ -298,7 +297,6 @@ contains
        call update_ion_density(dt)
     end if
 
-    tmp = field_fc
     call PM_update_efield(time)
 
     ! Update acceleration and correct positions and velocities
@@ -307,11 +305,6 @@ contains
     ! Handle ionization events etc.
     call handle_events(events)
     n_out = pc%get_num_sim_part()
-
-    ! Determine relative deviation in electric field
-    tmp = abs(field_fc - tmp) / max(maxval(abs(field_fc)), eps)
-    ix = maxloc(tmp)
-    field_change = tmp(ix(1))
 
     if (n_out > PM_merge_factor * merge_prev_npart) then
        call pc%merge_and_split([.true., .false., .false.], &
@@ -332,12 +325,6 @@ contains
     dt_drt = UC_eps0 / sigma
 
     dt_limit = 0.9_dp * min(dt_cfl, dt_drt)
-    ! if (field_change > 1e-1_dp) then
-    !    dt_limit = min(dt_limit, dt * 1e-1_dp / field_change)
-    ! end if
-
-    ! print *, ix(1), maxval(abs(field_fc)), field_fc(ix(1))
-    ! print *, dt, dt_cfl, dt_drt
   end subroutine particle_advance
 
   subroutine update_ion_density(dt)

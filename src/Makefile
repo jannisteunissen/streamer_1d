@@ -41,4 +41,6 @@ $(OBJS): particle_core/libparticle_core.a
 m_fluid_1d.o: m_generic.o m_transport_data.o
 m_particle_1d.o: m_generic.o
 m_generic.o: m_units_constants.o m_config.o m_init_cond.o m_flux_scheme.o
+m_init_cond.o: m_config.o
+streamer_1d.o: m_generic.o m_fluid_1d.o m_particle_1d.o
 ../streamer_1d: $(OBJS)

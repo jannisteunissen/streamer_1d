@@ -57,6 +57,9 @@ module m_fluid_1d
   real(dp) :: extrap_mob_c0
   real(dp) :: extrap_mob_c1
 
+  !> Whether to compute the source term from the fluxes
+  logical :: fluid_source_from_flux = .true.
+
   public :: fluid_initialize
   public :: fluid_advance
   public :: fluid_write_output
@@ -104,6 +107,9 @@ contains
 
     call CFG_add_get(cfg, "fluid%limit_velocity", fluid_limit_velocity, &
          "If true, keep the velocity constant for E > table_max_efield")
+
+    call CFG_add_get(cfg, "fluid%source_from_flux", fluid_source_from_flux, &
+         "Whether to compute the source term from the fluxes")
 
     ! Exit here if the fluid model is not used
     if (model_type /= model_fluid) return
@@ -278,8 +284,14 @@ contains
     call get_flux_1d(state%a(:, iv_elec), -mob_e * field_fc, diff_e, &
          domain_dx, flux, nx, n_ghost_cells)
 
-    ! Compute source term per cell using the fluxes at cell faces
-    call cell_face_to_center(source, src_e * abs(flux))
+    if (fluid_source_from_flux) then
+       ! Compute source term per cell using the fluxes at cell faces
+       call cell_face_to_center(source, src_e * abs(flux))
+    else
+       ! Compute source term at cell centers
+       source = src_e * abs(mob_e * field_cc(1:nx) * state%a(1:nx, iv_elec))
+    end if
+
     derivs%a(1:nx, iv_elec) = source
     derivs%a(1:nx, iv_pion) = source
 

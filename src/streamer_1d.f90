@@ -20,6 +20,7 @@ program streamer_1d
   real(dp)           :: dt_next       = 1e-12_dp
   real(dp)           :: dt_max        = 1e-11_dp
   real(dp)           :: dt_min        = 1e-13_dp
+  real(dp)           :: dt_fixed      = -1.0_dp
   real(dp)           :: dt_output     = 1.0e-10_dp
 
   real(dp)           :: dt, dt_limit
@@ -34,6 +35,8 @@ program streamer_1d
   call CFG_add_get(cfg, "dt%initial", dt_next, "Initial time step (s)")
   call CFG_add_get(cfg, "dt%max", dt_max, "Maximal time step (s)")
   call CFG_add_get(cfg, "dt%min", dt_min, "Minimal time step (s)")
+  call CFG_add_get(cfg, "dt%fixed", dt_fixed, &
+       "If positive, use fixed time step (s)")
   call CFG_add_get(cfg, "output%filename", output_name, &
        "Base file name for output")
   call CFG_add_get(cfg, "output%dt", dt_output, &
@@ -75,7 +78,13 @@ program streamer_1d
 
      if (model_type == model_fluid) then
         call fluid_advance(dt, time, dt_limit)
-        dt_next = get_new_dt(dt_next, dt_limit)
+
+        if (dt_fixed > 0) then
+           dt_next = dt_fixed
+           if (dt_next > dt_limit) error stop "Fixed dt too large"
+        else
+           dt_next = get_new_dt(dt_next, dt_limit)
+        end if
 
         if (write_output) then
            call fluid_write_output(output_name, time + dt, &
@@ -95,7 +104,8 @@ program streamer_1d
      time = time + dt
   end do
 
-  write(*, "(A,E10.4,A)") "Simulation ended after ", 1.0d9 * time, " ns"
+  write(*, "(A,E10.4,A,I0,A,E10.4)") "Simulation end, t = ", 1.0d9 * time, &
+       " ns, it = ", it, ", mean(dt) = ", time / it
 
 contains
 

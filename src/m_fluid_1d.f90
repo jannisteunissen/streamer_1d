@@ -188,7 +188,7 @@ contains
 
     ! Initialization of electron and ion density
     do n = 1, domain_nx
-       xx = (n-1) * domain_dx
+       xx = (n-0.5_dp) * domain_dx
        fluid_state%a(n, iv_elec) = init_elec_dens(xx)
        fluid_state%a(n, iv_pion) = init_pos_ion_dens(xx)
        fluid_state%a(n, iv_nion) = 0.0_dp

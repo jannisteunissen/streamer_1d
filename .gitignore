@@ -2,5 +2,4 @@
 /src/*.mod
 /streamer_1d
 /output/*
-*.sh
 *.mp4

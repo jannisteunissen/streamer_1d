@@ -35,3 +35,4 @@ m_particle_core.o:	m_cross_sec.o kdtree2.o m_lookup_table.o \
 m_gas.o:		m_units_constants.o
 m_cross_sec.o: 		m_units_constants.o
 m_pc_all.o:		m_particle_core.o m_gas.o
+kdtree2.o: FFLAGS+=-Wno-unused-function

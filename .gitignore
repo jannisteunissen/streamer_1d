@@ -13,3 +13,5 @@ test_m_particle_core
 test_m_photoi
 /tests/test_openmp
 /tests/test_swarm
+/tests/ion_drift
+/tests/test_m_cross_sec_summary_output.txt

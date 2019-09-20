@@ -25,7 +25,6 @@ program test_m_particle_core
   integer                 :: ll, step, rng_seed(4)
   type(CS_t), allocatable :: cross_secs(:)
   type(PC_t)              :: pc
-  type(PC_events_t)       :: events
 
   print *, "Testing m_particle_core.f90 implementation"
 
@@ -39,8 +38,8 @@ program test_m_particle_core
 
   print *, "Initializing particle module"
   rng_seed = get_random_seed()
-  call pc%initialize(part_mass, cross_secs, lkp_tbl_size, &
-       max_en_eV, max_num_part, rng_seed=rng_seed)
+  call pc%initialize(part_mass, max_num_part, rng_seed=rng_seed)
+  call pc%use_cross_secs(max_en_eV, lkp_tbl_size, cross_secs)
 
   where (pc%colls(:)%type == CS_ionize_t)
      pc%coll_is_event(:) = .true.
@@ -60,8 +59,8 @@ program test_m_particle_core
   do step = 1, max_num_steps
      write(*, '(F10.2,A,I10,A)') (step * 100.0_dp)/max_num_steps, '%, ', &
           pc%get_num_sim_part(), ' particles'
-     call pc%advance_openmp(delta_t, events)
-     print *, step, "total number of ionizations: ", events%n_stored
+     call pc%advance_openmp(delta_t)
+     print *, step, "total number of ionizations: ", pc%n_events
   end do
 
   call print_stats()

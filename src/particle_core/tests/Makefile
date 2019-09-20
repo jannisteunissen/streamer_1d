@@ -1,6 +1,6 @@
-FC 	:= mpif90
+FC 	:= gfortran
 FFLAGS	:= -Wall -g -O2 -fopenmp $(USR_FLAGS)
-TESTS	:= test_m_cross_sec test_openmp test_swarm
+TESTS	:= test_m_cross_sec test_openmp test_swarm ion_drift
 
 # Need these libraries for the tests
 LIBS	:= particle_core

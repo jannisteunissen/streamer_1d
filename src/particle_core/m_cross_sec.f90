@@ -43,18 +43,18 @@ module m_cross_sec
      character(LEN=line_len) :: comment       ! Additional comments
   end type CS_t
 
-  integer, parameter :: CS_attach_t = 1, &
-       CS_elastic_t = 2, &
-       CS_excite_t = 3, &
-       CS_ionize_t = 4, &
-       CS_num_types = 4
+  integer, parameter, public :: CS_attach_t  = 1
+  integer, parameter, public :: CS_elastic_t = 2
+  integer, parameter, public :: CS_excite_t  = 3
+  integer, parameter, public :: CS_ionize_t  = 4
+  integer, parameter, public :: CS_num_types = 4
+
   integer, parameter :: max_num_cols_per_gas = 50
-  integer, parameter :: max_num_rows = 400
+  integer, parameter :: max_num_rows         = 400
 
   ! Public variables
   public :: CS_t
   public :: CS_coll_t
-  public :: CS_attach_t, CS_elastic_t, CS_excite_t, CS_ionize_t
 
   ! Methods
   public :: CS_add_from_file
@@ -66,6 +66,7 @@ contains
   subroutine CS_add_from_file(filename, gas_name, number_dens, &
        req_energy, cross_secs)
     use m_units_constants
+    use iso_fortran_env, only: error_unit
     character(len=*), intent(IN)           :: filename, gas_name
     real(dp), intent(in)                   :: number_dens
     real(dp), intent(in)                   :: req_energy
@@ -195,8 +196,8 @@ contains
              else if (unit_string == "M3") then
                 y_scaling = y_scaling * number_dens
              else
-                print *, "TIMES_N: statement followed by wrong symbol"
-                print *, "Allowed are CM3 and M3"
+                write(error_unit, *) "TIMES_N: statement followed by wrong symbol"
+                write(error_unit, *) "Allowed are CM3 and M3"
                 go to 999
              end if
           else if ( line(1:7) == "SCALING") then
@@ -221,16 +222,16 @@ contains
              n_rows = n_rows + 1
              read(line, FMT = *, ERR = 999, end = 555) tempArray(:, n_rows)
           else
-             print *, "CS_read_file error: too many rows in ", trim(filename), &
-             " at line ", nL
-             stop
+             write(error_unit, *) "CS_read_file error: too many rows in ", &
+                  trim(filename), " at line ", nL
+             error stop
           end if
        end do
 
        if (n_rows < 2) then
-          print *, "CS_read_file error: need at least two values in ", &
+          write(error_unit, *) "CS_read_file error: need >= 2 rows in ", &
                trim(filename), " at line number ", nL
-          stop
+          error stop
        end if
 
        ! Store the data in the actual table
@@ -264,30 +265,30 @@ contains
        ! for all higher energies
        if ( cs_buf(cIx)%en_cs(1, n_rows) < req_energy .and. &
             & cs_buf(cIx)%en_cs(2, n_rows) > 0.0D0 ) then
-          print *, "CS_read_file error: cross section data at line ", nL, &
-               " does not go up to high enough x-values (energy)."
-          print *, "Required: ", req_energy, "found: ", &
+          write(error_unit, *) "CS_read_file error: cross section data at line ", &
+               nL, " does not go up to high enough x-values (energy)."
+          write(error_unit, *) "Required: ", req_energy, "found: ", &
                cs_buf(cIx)%en_cs(1, n_rows)
-          stop
+          error stop
        end if
 
     end do
 
 555 continue ! Routine ends here if the end of "filename" is reached erroneously
     close(my_unit, ERR = 999, IOSTAT = io_state)
-    print *, "CS_read_file error, reached end of file while searching. ", &
+    write(error_unit, *) "CS_read_file error: end of file while searching. ", &
          "io_state = ", io_state, " while reading from [", trim(filename), &
          "] at line ", nL
-    stop
+    error stop
     return
 
 666 continue ! Routine ends here if the end of "filename" is reached correctly
     close(my_unit, ERR = 999, IOSTAT = io_state)
 
     if (cIx == 0) then
-       print *, "No cross sections found while searching [", &
+       write(error_unit, *) "No cross sections found while searching [", &
             trim(gas_name), "] in [", trim(filename), "]"
-       stop
+       error stop
     end if
 
     ! Set the output data
@@ -308,13 +309,15 @@ contains
     return
 
 999 continue ! If there was an error, the routine will end here
-    print *, "CS_read_file error at line ", nL, " io_state = ", io_state, &
-         " while searching [", trim(gas_name), "] in [", trim(filename), "]"
-    stop
+    write(error_unit, *) "CS_read_file error at line ", nL, &
+         " io_state = ", io_state, " while searching [", trim(gas_name), &
+         "] in [", trim(filename), "]"
+    error stop
 
   end subroutine CS_add_from_file
 
   subroutine CS_write_summary(cross_secs, filename)
+    use iso_fortran_env, only: error_unit
     type(CS_t), intent(in)       :: cross_secs(:)
     character(LEN=*), intent(in) :: filename
     character(LEN=name_len)      :: col_name
@@ -351,9 +354,9 @@ contains
     return
 
 999 continue ! If there was an error, the routine will end here
-    print *, "CS_write_summary error, io_state = ", io_state, &
+    write(error_unit, *) "CS_write_summary error, io_state = ", io_state, &
          " while writing to ", trim(filename)
-    stop
+    error stop
 
   end subroutine CS_write_summary
 

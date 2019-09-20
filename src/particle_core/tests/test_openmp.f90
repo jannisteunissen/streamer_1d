@@ -25,7 +25,6 @@ program test_m_particle_core
   integer                 :: ll, step, num_colls
   type(CS_t), allocatable :: cross_secs(:)
   type(PC_t)              :: pc
-  type(PC_events_t)       :: events
 
   print *, "Testing m_particle_core.f90 implementation"
 
@@ -45,8 +44,8 @@ program test_m_particle_core
 
   print *, "Initializing particle module"
   print *, part_mass
-  call pc%initialize(part_mass, cross_secs, lkp_tbl_size, &
-       max_en_eV, max_num_part)
+  call pc%initialize(part_mass, max_num_part)
+  call pc%use_cross_secs(max_en_eV, lkp_tbl_size, cross_secs)
 
   num_colls = pc%get_num_colls()
   deallocate(cross_secs)
@@ -65,7 +64,7 @@ program test_m_particle_core
      print *, "at step", step, " and time ", (step-1) * delta_t
      call print_stats()
 
-     call pc%advance_openmp(delta_t, events)
+     call pc%advance_openmp(delta_t)
   end do
 
   call print_stats()

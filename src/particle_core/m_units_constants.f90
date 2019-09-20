@@ -32,9 +32,9 @@ module m_units_constants
   ! Physical constants
   ! TODO: add sign. digits
   real(dp), parameter :: UC_eps0            = 8.8541878176d-12        ! permitivity of vacuum (SI)
-  real(dp), parameter :: UC_elem_charge     = 1.6022d-19             ! the elementary charge in Coulombs
-  real(dp), parameter :: UC_elec_charge     = -1.6022d-19             ! the electron charge in Coulombs
-  real(dp), parameter :: UC_elec_volt       = 1.6022d-19              ! the eV in joules
+  real(dp), parameter :: UC_elem_charge     = 1.602176634d-19 ! the elementary charge in Coulombs
+  real(dp), parameter :: UC_elec_charge     = -UC_elem_charge ! the electron charge in Coulombs
+  real(dp), parameter :: UC_elec_volt       = UC_elem_charge              ! the eV in joules
   real(dp), parameter :: UC_elec_mass       = 9.10938189d-31          ! the electron mass in kg
   real(dp), parameter :: UC_atomic_mass     = 1.66053886D-27          ! the atomic mass unit in kg
   real(dp), parameter :: UC_N2_mass         = 28.0D0 * UC_atomic_mass ! The mass of a N2 molecule

@@ -1,14 +1,11 @@
-streamer_1d
-==
+# streamer_1d
 
 This is code for 1D discharge simulations with a particle-in-cell or fluid
 model.
 
-Getting the code:
+## Compiling the code
 
-    $ git clone https://github.com/jannisteunissen/streamer_1d.git
-
-Compiling the code:
+Compilation (requires `gfortran`):
 
     $ cd streamer_1d
     $ make
@@ -28,13 +25,11 @@ also be passed:
 
     $ ./streamer_1d example_1.cfg -end%time=1e-9
 
-Program options
-==
+## Program options
 
 Please have a look at the provided example configuration files for all the settings.
 
-Program output
-==
+## Program output
 
 Output files are stored in the "output" directory. The file names consists of several parts:
 

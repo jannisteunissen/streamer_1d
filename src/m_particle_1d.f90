@@ -54,7 +54,6 @@ module m_particle_1d
   character(len=10), allocatable :: gas_components(:)
   real(dp), allocatable          :: gas_fractions(:)
   type(PC_t)                     :: pc
-  type(PC_events_t)              :: events
 
   ! Public routines
   public :: particle_initialize
@@ -157,9 +156,12 @@ contains
     PM_scalars(:) = 0.0_dp
 
     pc%accel_function => accel_func
-    call pc%initialize(UC_elec_mass, cross_secs, tbl_size, max_eV, n_part_max)
+    call pc%initialize(UC_elec_mass, n_part_max)
+    call pc%use_cross_secs(max_eV, tbl_size, cross_secs)
 
     pc%outside_check => outside_check
+    pc%particle_mover => PC_verlet_advance
+    pc%after_mover => PC_verlet_correct_accel
 
     where (pc%colls(:)%type == CS_ionize_t .or. &
          pc%colls(:)%type == CS_attach_t)
@@ -274,8 +276,8 @@ contains
 
   function accel_func(my_part) result(accel)
     use m_units_constants
-    type(PC_part_t), intent(in) :: my_part
-    real(dp)                    :: accel(3)
+    type(PC_part_t), intent(inout) :: my_part
+    real(dp)                       :: accel(3)
 
     accel = get_accel(my_part%x(1))
   end function accel_func
@@ -302,7 +304,7 @@ contains
     real(dp), parameter   :: eps = 1e-100_dp
 
     n_in = pc%get_num_sim_part()
-    call pc%advance_openmp(dt, events)
+    call pc%advance_openmp(dt)
 
     if (ion_transport) then
        call update_ion_density(dt)
@@ -314,7 +316,7 @@ contains
     call pc%after_mover(dt)
 
     ! Handle ionization events etc.
-    call handle_events(events)
+    call handle_events(pc)
     n_out = pc%get_num_sim_part()
 
     if (n_out > PM_merge_factor * merge_prev_npart) then
@@ -423,42 +425,42 @@ contains
     end if
   end function random_round
 
-  subroutine handle_events(events)
+  subroutine handle_events(pc)
     use m_cross_sec
-    type(PC_events_t), intent(inout) :: events
-    integer                          :: n, n_se_photons
-    real(dp)                         :: w, sum_ionizations
-    real(dp)                         :: x(3), v(3), a(3), tmp
+    type(PC_t), intent(inout) :: pc
+    integer                   :: n, n_se_photons
+    real(dp)                  :: w, sum_ionizations
+    real(dp)                  :: x(3), v(3), a(3), tmp
 
     sum_ionizations = 0.0_dp
 
-    do n = 1, events%n_stored
-       select case (events%list(n)%ctype)
+    do n = 1, pc%n_events
+       select case (pc%event_list(n)%ctype)
        case (CS_ionize_t)
-          w = events%list(n)%part%w
-          call add_to_dens_cic(w, events%list(n)%part%x(1), iv_pion)
+          w = pc%event_list(n)%part%w
+          call add_to_dens_cic(w, pc%event_list(n)%part%x(1), iv_pion)
           sum_ionizations = sum_ionizations + w
 
        case (CS_attach_t)
-          call add_to_dens_cic(-events%list(n)%part%w, &
-               events%list(n)%part%x(1), iv_pion)
+          call add_to_dens_cic(-pc%event_list(n)%part%w, &
+               pc%event_list(n)%part%x(1), iv_pion)
 
        case (PC_particle_went_out)
-          if (events%list(n)%part%x(1) < 0.0_dp) then
+          if (pc%event_list(n)%part%x(1) < 0.0_dp) then
              PM_scalars(i_lbound_elec) = PM_scalars(i_lbound_elec) + &
-                  events%list(n)%part%w / PM_transverse_area
+                  pc%event_list(n)%part%w / PM_transverse_area
           else
              PM_scalars(i_rbound_elec) = PM_scalars(i_rbound_elec) + &
-                  events%list(n)%part%w / PM_transverse_area
+                  pc%event_list(n)%part%w / PM_transverse_area
           end if
 
        case default
-          print *, events%list(n)%ctype
+          print *, pc%event_list(n)%ctype
           error stop "Unknown event"
        end select
     end do
 
-    events%n_stored = 0
+    pc%n_events = 0
 
     ! Create electrons at walls due to secondary emission. Create at most
     ! PM_part_per_cell electrons at each boundary cell.
@@ -603,7 +605,7 @@ contains
     end do
 
     ! Convert to range of velocity**2
-    eedf(1, :) = eedf(1, :) * UC_elec_volt / (0.5_dp * pc%get_mass())
+    eedf(1, :) = eedf(1, :) * UC_elec_volt / (0.5_dp * pc%mass)
     accel_range = field_range * UC_elem_charge / UC_elec_mass
 
     call pc%histogram(get_vel_squared, select_part_by_accel, &
@@ -614,7 +616,7 @@ contains
     eedf(2, :) = eedf(2, :) / (sum(eedf(2, :)) * delta_en)
 
     ! Convert to energy range
-    eedf(1, :) = eedf(1, :) * 0.5_dp * pc%get_mass() / UC_elec_volt
+    eedf(1, :) = eedf(1, :) * 0.5_dp * pc%mass / UC_elec_volt
   end subroutine get_eedf
 
   real(dp) function get_vel_squared(my_part)
@@ -631,8 +633,8 @@ contains
          accel <= accel_range(2))
   end function select_part_by_accel
 
-  pure integer function outside_check(my_part)
-    type(PC_part_t), intent(in) :: my_part
+  integer function outside_check(my_part)
+    type(PC_part_t), intent(inout) :: my_part
 
     if (my_part%x(1) < 0.0_dp .or. my_part%x(1) > domain_length) then
        outside_check = 1

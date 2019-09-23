@@ -49,8 +49,11 @@ module m_cross_sec
   integer, parameter, public :: CS_ionize_t  = 4
   integer, parameter, public :: CS_num_types = 4
 
-  integer, parameter :: max_num_cols_per_gas = 50
-  integer, parameter :: max_num_rows         = 400
+  !> Maximum number of cross sections per gas
+  integer, parameter :: max_processes_per_gas = 200
+
+  !> Maximum number of rows per cross section in input files
+  integer, parameter :: max_num_rows = 2000
 
   ! Public variables
   public :: CS_t
@@ -73,7 +76,7 @@ contains
     type(CS_t), intent(inout), allocatable :: cross_secs(:)
 
     type(CS_t), allocatable :: cs_cpy(:)
-    type(CS_t)              :: cs_buf(max_num_cols_per_gas)
+    type(CS_t)              :: cs_buf(max_processes_per_gas)
     integer                 :: n, cIx, nL, n_rows, col_type
     integer                 :: my_unit, io_state, len_gas_name
     character(LEN=name_len) :: lineFMT, unit_string

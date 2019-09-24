@@ -355,8 +355,8 @@ contains
     mob_i(:)  = ion_mobility
 
     ! Compute ion flux
-    call get_flux_1d(PM_vars(:, iv_pion), mob_i * field_fc, &
-         diff_i, domain_dx, flux, nx, n_ghost_cells)
+    call get_flux_1d(nx, n_ghost_cells, PM_vars(:, iv_pion), &
+         mob_i * field_fc, diff_i, domain_dx, flux)
 
     do n = 1, nx
        PM_vars(n, iv_pion) = PM_vars(n, iv_pion) + &

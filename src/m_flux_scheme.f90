@@ -7,11 +7,13 @@ module m_flux_scheme
   integer, parameter :: dp = kind(0.0d0)
 
   public :: get_flux_1d
+  public :: add_drift_flux_1d
+  public :: add_diff_flux_1d
 
 contains
 
   !> Compute advective and diffusive flux
-  subroutine get_flux_1d(cc, v, dc, dx, flux, nc, ngc)
+  subroutine get_flux_1d(nc, ngc, cc, v, dc, dx, flux)
     integer, intent(in)   :: nc               !< Number of cells
     integer, intent(in)   :: ngc              !< Number of ghost cells
     real(dp), intent(in)  :: cc(1-ngc:nc+ngc) !< Cell-centered values
@@ -42,6 +44,56 @@ contains
     end do
 
   end subroutine get_flux_1d
+
+  !> Add advective component to the flux
+  subroutine add_drift_flux_1d(nc, ngc, cc, v, flux)
+    integer, intent(in)     :: nc               !< Number of cells
+    integer, intent(in)     :: ngc              !< Number of ghost cells
+    real(dp), intent(in)    :: cc(1-ngc:nc+ngc) !< Cell-centered values
+    !> Input: velocities at cell faces
+    real(dp), intent(in)    :: v(1:nc+1)
+    !> Output: flux at cell faces
+    real(dp), intent(inout) :: flux(1:nc+1)
+    real(dp)                :: gradp, gradc, gradn
+    integer                 :: n
+
+    do n = 1, nc+1
+       gradc = cc(n) - cc(n-1)  ! Current gradient
+       if (v(n) < 0.0_dp) then
+          gradn = cc(n+1) - cc(n) ! Next gradient
+          flux(n) = flux(n) + v(n) * (cc(n) - koren_mlim(gradc, gradn))
+       else                     ! v(n) > 0
+          gradp = cc(n-1) - cc(n-2) ! Previous gradient
+          flux(n) = flux(n) + v(n) * (cc(n-1) + koren_mlim(gradc, gradp))
+       end if
+    end do
+
+  end subroutine add_drift_flux_1d
+
+  !> Add diffusive component to the flux
+  subroutine add_diff_flux_1d(nc, ngc, cc, dc, dx, flux)
+    integer, intent(in)     :: nc               !< Number of cells
+    integer, intent(in)     :: ngc              !< Number of ghost cells
+    real(dp), intent(in)    :: cc(1-ngc:nc+ngc) !< Cell-centered values
+    !> Input: diffusion coefficients at cell faces
+    real(dp), intent(in)    :: dc(1:nc+1)
+    !> Grid spacing
+    real(dp), intent(in)    :: dx
+    !> Output: flux at cell faces
+    real(dp), intent(inout) :: flux(1:nc+1)
+    real(dp)                :: gradc, inv_dx
+    integer                 :: n
+
+    inv_dx = 1/dx
+
+    do n = 1, nc+1
+       gradc = cc(n) - cc(n-1)  ! Current gradient
+
+       ! Add diffusive flux (central differences)
+       flux(n) = flux(n) - dc(n) * gradc * inv_dx
+    end do
+
+  end subroutine add_diff_flux_1d
 
   !> Modified implementation of Koren limiter, to avoid division and the min/max
   !> functions, which can be problematic / expensive. In most literature, you

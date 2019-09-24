@@ -7,8 +7,8 @@ module m_fluid_1d
   private
 
   integer, parameter :: dp = kind(0.0d0)
-
   integer, parameter :: n_ghost_cells = 2
+  real(dp), parameter :: huge_value = 1e100_dp
 
   integer, parameter :: forward_euler    = 1
   integer, parameter :: trapezoidal      = 2
@@ -47,6 +47,9 @@ module m_fluid_1d
 
   !> Maximum electric field for the transport data table
   real(dp) :: fluid_max_field = 2.5e7_dp
+
+  !> Disable diffusion parallel to fields above this threshold (V/m)
+  real(dp) :: fluid_diffusion_emax = huge_value
 
   !> Set density to zero below this value
   real(dp) :: fluid_small_density = 1.0_dp
@@ -94,6 +97,8 @@ contains
          "Size of lookup table for transport coefficients")
     call CFG_add_get(cfg, "fluid%table_max_efield", fluid_max_field, &
          "Maximum electric field in transport coefficient table")
+    call CFG_add_get(cfg, "fluid%diffusion_emax", fluid_diffusion_emax, &
+         "Disable diffusion parallel to fields above this threshold (V/m)")
     call CFG_add_get(cfg, "fluid%small_density", fluid_small_density, &
          "Smallest allowed density in the fluid model (1/m3)")
     call CFG_add_get(cfg, "fluid%integrator", integrator, &
@@ -276,8 +281,20 @@ contains
     end where
 
     ! Compute electron flux
-    call get_flux_1d(state%a(:, iv_elec), -mob_e * field_fc, diff_e, &
-         domain_dx, flux, nx, n_ghost_cells)
+    flux = 0
+    call add_diff_flux_1d(nx, n_ghost_cells, state%a(:, iv_elec), &
+         diff_e, domain_dx, flux)
+
+    if (fluid_diffusion_emax < huge_value) then
+       ! If the diffusive flux is parallel to the field, and the field above a
+       ! threshold, set the flux to zero
+       where (flux * field_fc > 0 .and. abs(field_fc) > fluid_diffusion_emax)
+          flux = 0
+       end where
+    end if
+
+    call add_drift_flux_1d(nx, n_ghost_cells, state%a(:, iv_elec), &
+         -mob_e * field_fc, flux)
 
     if (fluid_avoid_drt) then
        drt_fac = UC_eps0 / max(1e-100_dp, UC_elem_charge * dt)
@@ -354,8 +371,8 @@ contains
        mob_i(:) = ion_mobility
 
        ! Compute ion flux
-       call get_flux_1d(state%a(:, iv_pion), mob_i * field_fc, &
-            diff_i, domain_dx, flux, nx, n_ghost_cells)
+       call get_flux_1d(nx, n_ghost_cells, state%a(:, iv_pion), &
+            mob_i * field_fc, diff_i, domain_dx, flux)
        do n = 1, nx
           derivs%a(n, iv_pion) = derivs%a(n, iv_pion) + &
                domain_inv_dx * (flux(n) - flux(n+1))

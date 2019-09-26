@@ -56,9 +56,6 @@ module m_generic
   !> Electric potential at cell centers
   real(dp), allocatable, protected :: potential(:)
 
-  !> Name of gas mixture
-  character(len=40), protected :: gas_name = "N2"
-
   !> Gas pressure in bar
   real(dp), protected :: gas_pressure = 1.0_dp
 
@@ -95,8 +92,6 @@ contains
 
     call init_initialize(cfg)
 
-    call CFG_add_get(cfg, "gas%name", gas_name, &
-         "Name of gas mixture")
     call CFG_add_get(cfg, "gas%pressure", gas_pressure, &
          "Gas pressure in bar")
     call CFG_add_get(cfg, "gas%temperature", gas_temperature, &

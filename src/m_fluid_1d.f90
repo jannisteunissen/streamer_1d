@@ -175,25 +175,25 @@ contains
     fluid_lkp_fld = LT_create(0.0_dp, fluid_max_field, table_size, 0)
 
     call CFG_get(cfg, "fluid%fld_mob", data_name)
-    call TD_get_td_from_file(input_file, gas_name, &
+    call TD_get_td_from_file(input_file, &
          trim(data_name), x_data, y_data)
     call LT_add_col(fluid_lkp_fld, x_data, y_data)
     ix_mob = fluid_lkp_fld%n_cols
 
     call CFG_get(cfg, "fluid%fld_dif", data_name)
-    call TD_get_td_from_file(input_file, gas_name, &
+    call TD_get_td_from_file(input_file, &
          trim(data_name), x_data, y_data)
     call LT_add_col(fluid_lkp_fld, x_data, y_data)
     ix_diff = fluid_lkp_fld%n_cols
 
     call CFG_get(cfg, "fluid%fld_alpha", data_name)
-    call TD_get_td_from_file(input_file, gas_name, &
+    call TD_get_td_from_file(input_file, &
          trim(data_name), x_data, y_data)
     call LT_add_col(fluid_lkp_fld, x_data, y_data)
     ix_alpha = fluid_lkp_fld%n_cols
 
     call CFG_get(cfg, "fluid%fld_eta", data_name)
-    call TD_get_td_from_file(input_file, gas_name, &
+    call TD_get_td_from_file(input_file, &
          trim(data_name), x_data, y_data, found)
     if (found) then
        call LT_add_col(fluid_lkp_fld, x_data, y_data)

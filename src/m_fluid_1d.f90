@@ -60,11 +60,20 @@ module m_fluid_1d
   real(dp) :: extrap_mob_c0
   real(dp) :: extrap_mob_c1
 
-  !> Whether to compute the source term from the fluxes
-  logical :: fluid_source_from_flux = .true.
-
   !> Limit fluxes to avoid the dielectric relaxation time
   logical :: fluid_avoid_drt = .false.
+
+  !> Use a factor in the source to account for parallel diffusion
+  !> See V R Soloviev and V M Krivtsov 2009 J. Phys. D: Appl. Phys. 42 125208
+  integer, parameter :: source_centered = 0
+  integer, parameter :: source_flux = 1
+  integer, parameter :: source_drift_flux = 2
+  integer, parameter :: source_factor = 3
+
+  !> How to compute source terms in the fluid model
+  integer :: fluid_source_method = source_flux
+  !> The source term can increase compared to the normal case
+  logical :: fluid_source_increase = .true.
 
   public :: fluid_initialize
   public :: fluid_advance
@@ -84,7 +93,7 @@ contains
     real(dp)                   :: xx, x(2), y(2)
     real(dp), allocatable      :: x_data(:), y_data(:)
     character(len=100)         :: data_name
-    character(len=40)          :: integrator
+    character(len=40)          :: integrator, source_method
     logical                    :: found
 
     input_file          = "input/n2_transport_data_siglo.txt"
@@ -116,8 +125,25 @@ contains
     call CFG_add_get(cfg, "fluid%limit_velocity", fluid_limit_velocity, &
          "If true, keep the velocity constant for E > table_max_efield")
 
-    call CFG_add_get(cfg, "fluid%source_from_flux", fluid_source_from_flux, &
-         "Whether to compute the source term from the fluxes")
+    source_method = "centered"
+    call CFG_add_get(cfg, "fluid%source_method", source_method, &
+         "How to compute the source term (default, flux, factor)")
+    call CFG_add_get(cfg, "fluid%source_increase", fluid_source_increase, &
+         "The source term can increase compared to the normal case")
+
+    select case (source_method)
+    case ("centered")
+       fluid_source_method = source_centered
+    case ("flux")
+       fluid_source_method = source_flux
+    case ("drift_flux")
+       fluid_source_method = source_drift_flux
+    case ("factor")
+       fluid_source_method = source_factor
+    case default
+       error stop "Unknown fluid%source_method (options: default, flux, factor)"
+    end select
+
     call CFG_add_get(cfg, "fluid%avoid_drt", fluid_avoid_drt, &
          "Limit fluxes to avoid the dielectric relaxation time")
 
@@ -242,8 +268,8 @@ contains
     real(dp)                    :: surface_charge(2), se
     real(dp), allocatable       :: mob_e(:), diff_e(:), src_e(:)
     real(dp), allocatable       :: mob_i(:), diff_i(:), mob_cc(:)
-    real(dp), allocatable       :: flux(:), max_flux(:)
-    real(dp), allocatable       :: source(:)
+    real(dp), allocatable       :: flux(:), flux_d(:), max_flux(:)
+    real(dp), allocatable       :: source(:), tmp_vec(:), src_fac(:)
     real(dp), allocatable       :: sigma(:)
     real(dp)                    :: dt_cfl, dt_dif, dt_drt
     real(dp)                    :: drt_fac, tmp
@@ -257,6 +283,7 @@ contains
     call set_boundary_conditions(state)
 
     allocate(flux(1:nx+1))
+    allocate(flux_d(1:nx+1))
     allocate(mob_i(nx+1))
     allocate(diff_i(nx+1))
 
@@ -280,21 +307,35 @@ contains
        mob_e = extrap_mob(abs(field_fc))
     end where
 
-    ! Compute electron flux
-    flux = 0
+    ! Compute diffusive electron flux
+    flux_d = 0
     call add_diff_flux_1d(nx, n_ghost_cells, state%a(:, iv_elec), &
-         diff_e, domain_dx, flux)
+         diff_e, domain_dx, flux_d)
 
     if (fluid_diffusion_emax < huge_value) then
        ! If the diffusive flux is parallel to the field, and the field above a
        ! threshold, set the flux to zero
-       where (flux * field_fc > 0 .and. abs(field_fc) > fluid_diffusion_emax)
-          flux = 0
+       where (flux_d * field_fc > 0 .and. abs(field_fc) > fluid_diffusion_emax)
+          flux_d = 0
        end where
     end if
 
+    ! Compute advective electron flux
+    flux = 0
     call add_drift_flux_1d(nx, n_ghost_cells, state%a(:, iv_elec), &
          -mob_e * field_fc, flux)
+
+    if (fluid_source_method == source_factor) then
+       allocate(src_fac(nx))
+       src_fac = 1 - (flux_d(1:nx) * sign(1.0_dp, field_fc(1:nx)) + &
+            flux_d(2:nx+1) * sign(1.0_dp, field_fc(2:nx+1))) / &
+            max(abs(flux(1:nx) + flux(2:nx+1)), 1e-10_dp)
+       src_fac = max(0.0_dp, src_fac)
+       if (.not. fluid_source_increase) src_fac = min(1.0_dp, src_fac)
+    end if
+
+    ! Add fluxes
+    flux = flux + flux_d
 
     if (fluid_avoid_drt) then
        drt_fac = UC_eps0 / max(1e-100_dp, UC_elem_charge * dt)
@@ -312,7 +353,8 @@ contains
        end where
     end if
 
-    if (fluid_source_from_flux) then
+    select case (fluid_source_method)
+    case (source_flux, source_drift_flux)
        ! Compute source terms using the fluxes at cell faces
        src_e = LT_get_col_at_loc(fluid_lkp_fld, ix_alpha, fld_locs)
 
@@ -321,8 +363,21 @@ contains
           src_e = src_e - LT_get_col_at_loc(fluid_lkp_fld, ix_eta, fld_locs)
        end if
 
-       call cell_face_to_center(source, src_e * abs(flux))
-    else
+       if (fluid_source_method == source_drift_flux) then
+          call cell_face_to_center(source, src_e * abs(flux-flux_d))
+       else
+          call cell_face_to_center(source, src_e * abs(flux))
+
+          ! Ensure the source term is not bigger than before
+          if (.not. fluid_source_increase) then
+             allocate(tmp_vec(nx))
+             call cell_face_to_center(tmp_vec, src_e * abs(flux-flux_d))
+             where (abs(tmp_vec) < abs(source))
+                source = tmp_vec
+             end where
+          end if
+       end if
+    case (source_centered, source_factor)
        ! Compute source term at cell centers
        fld_locs_cc = LT_get_loc(fluid_lkp_fld, abs(field_cc(1:nx)))
        src_e       = LT_get_col_at_loc(fluid_lkp_fld, ix_alpha, fld_locs_cc)
@@ -334,7 +389,11 @@ contains
        end if
 
        source = src_e * abs(mob_cc * field_cc(1:nx) * state%a(1:nx, iv_elec))
-    end if
+
+       if (fluid_source_method == source_factor) then
+          source = source * src_fac
+       end if
+    end select
 
     derivs%a(1:nx, iv_elec) = source
     derivs%a(1:nx, iv_pion) = source

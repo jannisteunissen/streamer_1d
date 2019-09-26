@@ -20,8 +20,10 @@ def getArgs():
     parser.add_argument("outfile", type=str, help="output file")
     parser.add_argument("-g", dest="gas_name", type=str,
                         default="GAS", help="for output: gas name")
-    parser.add_argument("-p", dest="gas_pressure", type=float,
-                        default=1.0, help="for output: gas pressure (bar)")
+    parser.add_argument("-T", type=float, default=300.,
+                        help="Gas temperature (K)")
+    parser.add_argument("-p", type=float,
+                        default=1.0, help="Gas pressure (bar)")
 
     return parser.parse_args()
 
@@ -33,58 +35,23 @@ def convert():
         fr = f.read()
         fr = re.sub(r'(\r\n|\r|\n)', '\n', fr)  # Fix newlines
 
-    # Look up gas temperature and determine file type
-    ftypes = {}
-    ftypes['bolsig+'] = r'Tgas\s*=\s*(\S+)\s+K'
-    # ftypes['www'] = r'Tgas\s*=\s*(\S+)\s+K'
-    syntax = None
-
-    for syn in ftypes:
-        match = re.search(ftypes[syn], fr)
-        if (match):
-            syntax = syn
-            print("Syntax found: {0}".format(syntax))
-            gas_temp = float(match.group(1))
-            break
-
-    if not syntax:
-        raise ValueError('No syntax found')
-
     # Look up columns of things we are interested in
-    if syntax == 'bolsig+':
-        Efield_label = 'E/N(Td)'
-        match = re.search(r'(A\S*).*Mean energy \(eV\)', fr)
-        eV_label = match.group(1)
-        match = re.search(r'(A\S*).*Mobility \*N \(1\/m\/V\/s\)', fr)
-        mu_label = match.group(1)
-        match = re.search(r'(A\S*).*Diffusion coefficient'
-                          + r' \*N \(1\/m\/s\)', fr)
-        dc_label = match.group(1)
-        match = re.search(r'(A\S*).*Townsend ioniz. coef. alpha/N \(m2\)', fr)
-        alpha_label = match.group(1)
-        eta_label = 'I_DO_NOT_EXIST?'
+    Efield_label = 'E/N(Td)'
+    match = re.search(r'(A\S*).*Mean energy \(eV\)', fr)
+    eV_label = match.group(1)
+    match = re.search(r'(A\S*).*Mobility \*N \(1\/m\/V\/s\)', fr)
+    mu_label = match.group(1)
+    match = re.search(r'(A\S*).*Diffusion coefficient'
+                      + r' \*N \(1\/m\/s\)', fr)
+    dc_label = match.group(1)
+    match = re.search(r'(A\S*).*Townsend ioniz. coef. alpha/N \(m2\)', fr)
+    alpha_label = match.group(1)
+    eta_label = 'I_DO_NOT_EXIST?'
 
-        # Listing of columns at the start
-        match = re.search(r'.*(\s+(A\d+)){5,}.*', fr)
-        header = re.sub(r'E/N \(', r'E/N(', match.group(0))
-        tbl_start = match.end() + 1
-    elif syntax == 'www':
-        Efield_label = 'E/N'
-        eV_label = 'Ee'
-        mu_label = 'muN'
-        dc_label = 'DN'
-        alpha_label = 'alpha/N'
-        eta_label = 'eta/N'
-
-        # Find start of table
-        # Listing of columns at the start
-        match = re.search(r'#\s+E\/N\s+Ee.*', fr)
-        header = match.group(0)
-        # Listing of units at the start
-        match = re.search(r'#\s+Td\s+eV.*', fr)
-        tbl_start = match.end() + 1
-    else:
-        raise ValueError('Unknown syntax')
+    # Listing of columns at the start
+    match = re.search(r'.*(\s+(A\d+)){5,}.*', fr)
+    header = re.sub(r'E/N \(', r'E/N(', match.group(0))
+    tbl_start = match.end() + 1
 
     # Find indexes of columns
     column_order = header.split()
@@ -107,10 +74,10 @@ def convert():
     tbl_data = np.matrix(tbl_string)
 
     boltzmann_const = 1.3806488e-23
-    gas_num_dens = cfg.gas_pressure * 1e5 / (boltzmann_const * gas_temp)
+    gas_num_dens = cfg.p * 1e5 / (boltzmann_const * cfg.T)
 
-    print("Gas temperature %.3e Kelvin" % (gas_temp))
-    print("Gas pressure     %.3e bar" % (cfg.gas_pressure))
+    print("Gas temperature %.3e Kelvin" % (cfg.T))
+    print("Gas pressure     %.3e bar" % (cfg.p))
     print("Gas #density     %.3e /m3" % (gas_num_dens))
 
     # Clear file

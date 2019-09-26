@@ -48,9 +48,11 @@ def convert():
     alpha_label = match.group(1)
     eta_label = 'I_DO_NOT_EXIST?'
 
-    # Listing of columns at the start
+    # Listing of columns at the start (e.g. R# E/N (Td) A1 A2 A6 ...)
     match = re.search(r'.*(\s+(A\d+)){5,}.*', fr)
+    # Remove the space from 'E/N (Td)'
     header = re.sub(r'E/N \(', r'E/N(', match.group(0))
+    # The table starts after the header
     tbl_start = match.end() + 1
 
     # Find indexes of columns
@@ -70,8 +72,14 @@ def convert():
     match = re.search(r'^\s*$', fr[tbl_start:], re.M)
     tbl_end = tbl_start + match.start() - 1
 
-    tbl_string = fr[tbl_start:tbl_end].replace('\n', ';')
-    tbl_data = np.matrix(tbl_string)
+    tbl_string = fr[tbl_start:tbl_end].splitlines()
+    tbl_data = np.genfromtxt(tbl_string)
+
+    # Check if all data was read correctly
+    if np.any(np.isnan(tbl_data)):
+        print("! Warning: some data could not be read properly!")
+        print("! Number of missing values: {}".format(
+            np.sum(np.isnan(tbl_data))))
 
     boltzmann_const = 1.3806488e-23
     gas_num_dens = cfg.p * 1e5 / (boltzmann_const * cfg.T)

@@ -78,13 +78,7 @@ program streamer_1d
 
      if (model_type == model_fluid) then
         call fluid_advance(dt, time, dt_limit)
-
-        if (dt_fixed > 0) then
-           dt_next = dt_fixed
-           if (dt_next > dt_limit) error stop "Fixed dt too large"
-        else
-           dt_next = get_new_dt(dt_next, dt_limit)
-        end if
+        dt_next = get_new_dt(dt_next, dt_limit)
 
         if (write_output) then
            call fluid_write_output(output_name, time + dt, &
@@ -97,6 +91,14 @@ program streamer_1d
         if (write_output) then
            call particle_write_output(output_name, time + dt, &
                 dt_next, output_ix)
+        end if
+     end if
+
+     if (dt_fixed > 0) then
+        dt_next = dt_fixed
+        if (dt_next > dt_limit) then
+           print *, "dt_fixed, dt_limit:", dt_fixed, dt_limit
+           error stop "Fixed dt too large"
         end if
      end if
 

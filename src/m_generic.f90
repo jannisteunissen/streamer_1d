@@ -26,6 +26,9 @@ module m_generic
   !> Inverse grid spacing
   real(dp), protected :: domain_inv_dx
 
+  !> Apply E = -voltage/domain_length through Neumann boundary condition
+  logical, protected :: voltage_neumann_bc = .false.
+
   !> Voltage (V) on right domain boundary (left is grounded)
   real(dp), protected :: voltage_v0       = -2e4_dp
 
@@ -133,6 +136,8 @@ contains
     allocate(field_fc(domain_nx+1))
     field_fc(:) = 0.0_dp
 
+    call CFG_add_get(cfg, "voltage%neumann_bc", voltage_neumann_bc, &
+         "Apply E = -voltage/domain_length through Neumann boundary condition")
     call CFG_add_get(cfg, "voltage%v0", voltage_v0, &
          "Voltage amplitude (V) over domain (including dielectrics)")
     call CFG_add_get(cfg, "voltage%risetime", voltage_risetime, &
@@ -169,7 +174,7 @@ contains
     real(dp), intent(in) :: net_charge(:)
     real(dp), intent(in) :: surface_charge(2)
     real(dp), intent(in) :: time
-    real(dp)             :: conv_fac, E_corr_gas
+    real(dp)             :: conv_fac, E_applied, E_corr_gas
     real(dp)             :: pot_diff, pot_correct
     integer              :: n, nx
 
@@ -202,12 +207,18 @@ contains
             (field_fc(nx+1) + surface_charge(2))
     end if
 
-    ! Have to correct the potential by this amount
-    pot_correct = get_potential(time) - pot_diff
+    if (voltage_neumann_bc) then
+       ! Correct field
+       E_applied = -get_potential(time)/domain_length
+       E_corr_gas = E_applied - field_fc(nx+1)
+    else
+       ! Have to correct the potential by this amount
+       pot_correct = get_potential(time) - pot_diff
 
-    ! Determine the correction between the dielectrics
-    E_corr_gas = -pot_correct / (domain_length + &
-         count(dielectric_present) * dielectric_width/dielectric_eps)
+       ! Determine the correction between the dielectrics
+       E_corr_gas = -pot_correct / (domain_length + &
+            count(dielectric_present) * dielectric_width/dielectric_eps)
+    end if
 
     field_fc(:) = field_fc(:) + E_corr_gas
 

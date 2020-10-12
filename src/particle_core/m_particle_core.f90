@@ -264,6 +264,9 @@ module m_particle_core
      end function rate_func
   end interface
 
+  ! Public types
+  public :: PC_particle_went_out
+
   ! Public procedures
   public :: PC_merge_part_rxv
   public :: PC_split_part
@@ -296,7 +299,7 @@ contains
        rng_seed_8byte = transfer(rng_seed, rng_seed_8byte)
        call self%rng%set_seed(rng_seed_8byte)
     else
-       call self%rng%set_seed([8972134_i8, 21384823409_i8])
+       call self%rng%set_random_seed()
     end if
 
     ! Set default particle mover
@@ -354,7 +357,7 @@ contains
        rng_seed_8byte = transfer(rng_seed, rng_seed_8byte)
        call self%rng%set_seed(rng_seed_8byte)
     else
-       call self%rng%set_seed([8972134_i8, 21384823409_i8])
+       call self%rng%set_random_seed()
     end if
   end subroutine init_from_file
 
@@ -580,6 +583,7 @@ contains
 
     do
        n_hi = self%n_part
+       !$omp barrier
        !$omp do
        do n = n_lo, n_hi
           call self%move_and_collide(n, prng%rngs(tid), buffer)
@@ -619,6 +623,9 @@ contains
 
     associate(part => self%particles(ix))
       do
+         ! If the particles are treated as a tracer, advance without collision
+         if (associated(self%particle_mover, PC_tracer_advance_midpoint)) exit
+
          ! Get the next collision time
          coll_time = sample_coll_time(rng%unif_01(), self%inv_max_rate)
 

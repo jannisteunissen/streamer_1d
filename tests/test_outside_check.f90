@@ -1,4 +1,4 @@
-program test_m_particle_core
+program test_outside_check
   use m_particle_core
   use m_cross_sec
   use m_units_constants
@@ -17,12 +17,12 @@ program test_m_particle_core
   real(dp), parameter     :: max_en_eV     = 500.0_dp
   real(dp), parameter     :: pressure      = 1.0_dp
   real(dp), parameter     :: temperature   = 300.0_dp
-  real(dp), parameter     :: field_z       = -5e6_dp
+  real(dp), parameter     :: field_z       = -1e7_dp
   real(dp), parameter     :: part_mass     = UC_elec_mass
   real(dp)                :: init_accel(3)
   real(dp)                :: pos(3), vel(3), accel(3), weight
   real(dp)                :: neutral_dens
-  integer                 :: ll, step, rng_seed(4)
+  integer                 :: ll, step
   type(CS_t), allocatable :: cross_secs(:)
   type(PC_t)              :: pc
 
@@ -40,6 +40,8 @@ program test_m_particle_core
   call pc%initialize(part_mass, max_num_part)
   call pc%use_cross_secs(max_en_eV, lkp_tbl_size, cross_secs)
 
+  pc%outside_check => outside_check
+
   where (pc%colls(:)%type == CS_ionize_t)
      pc%coll_is_event(:) = .true.
   end where
@@ -56,60 +58,24 @@ program test_m_particle_core
   end do
 
   do step = 1, max_num_steps
-     write(*, '(F10.2,A,I10,A)') (step * 100.0_dp)/max_num_steps, '%, ', &
-          pc%get_num_sim_part(), ' particles'
      call pc%advance_openmp(delta_t)
-     print *, step, "total number of ionizations: ", pc%n_events
+     print *, step, pc%n_part, &
+          count(pc%event_list(1:pc%n_events)%ctype == PC_particle_went_out), &
+          count(pc%event_list(1:pc%n_events)%ctype == CS_ionize_t), &
+          minval(pc%event_list(1:pc%n_events)%part%w), &
+          maxval(pc%event_list(1:pc%n_events)%part%w)
   end do
-
-  call print_stats()
 
 contains
 
-  subroutine part_stats(part, vec)
-    type(PC_part_t), intent(in) :: part
-    real(dp), intent(out) :: vec(:)
-    vec(1:3) = part%w * part%x
-    vec(4:6) = part%w * part%v
-    vec(7:9) = part%w * part%a
-    vec(10) = part%w * PC_v_to_en(part%v, part_mass)
-    vec(11) = part%w
-  end subroutine part_stats
+  integer function outside_check(my_part)
+    type(PC_part_t), intent(inout) :: my_part
 
-  subroutine print_stats()
-    integer :: n_part
-    real(dp) :: sum_x(3), sum_v(3), sum_a(3), sum_en
-    real(dp) :: sum_weight
-    real(dp) :: sum_vec(11)
+    outside_check = 0
 
-    real(dp), parameter :: x3_stored        = 1.9793569827856038e-4_dp
-    real(dp), parameter :: n_stored         = 64106.0_dp
-    real(dp), parameter :: max_deviation(2) = [2.0e-3_dp, 2.0e-2_dp]
-    real(dp)            :: rel_deviation(2)
-
-    n_part = 0
-
-    n_part = n_part + pc%get_num_sim_part()
-    call pc%compute_vector_sum(part_stats, sum_vec)
-
-    sum_weight = sum_vec(11)
-    sum_x = sum_vec(1:3)
-    sum_v = sum_vec(4:6)
-    sum_a = sum_vec(7:9)
-    sum_en =  sum_vec(10)
-
-    print *, ""
-    write(*, '(A,3E12.4)') " mean(x):", sum_x / sum_weight
-    write(*, '(A,E12.4)') " n_particles", sum_weight
-    rel_deviation = [abs(x3_stored - sum_x(3) / sum_weight) / x3_stored, &
-         abs(n_stored - sum_weight) / n_stored]
-    write(*, '(A,2E12.4)') " Rel. diff. with stored run: ", rel_deviation
-    if (all(rel_deviation < max_deviation)) then
-       print *, "PASS"
-    else
-       print *, "Deviation too large"
-       error stop "FAIL"
+    if (norm2(my_part%x) > 5.0e-5_dp) then
+       outside_check = 1
     end if
-  end subroutine print_stats
+  end function outside_check
 
-end program test_m_particle_core
+end program

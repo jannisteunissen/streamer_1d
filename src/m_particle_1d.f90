@@ -76,6 +76,7 @@ contains
     integer                 :: n_gas_comp
     integer                 :: n_part_init, n_part_max
     integer                 :: n, i, num_part, tbl_size
+    integer                 :: rng_seed(4)
     real(dp)                :: x, sum_elec_dens, max_elec_dens
     real(dp)                :: elec_dens, ion_dens
     real(dp)                :: pos(3), vel(3), accel(3), max_eV
@@ -122,6 +123,10 @@ contains
     call CFG_add_get(cfg, "particle%eedf_npoints", PM_eedf_npoints, &
          "Number of points for eedf")
 
+    rng_seed = [-1327453977, -724687200, -622838620, 1595845450]
+    call CFG_add_get(cfg, "particle%rng_seed", rng_seed, &
+         "Seed for RNG; if all zeros generate a random state")
+
     ! Exit here if we don't use the particle model
     if (model_type /= model_particle) return
 
@@ -156,7 +161,12 @@ contains
     PM_scalars(:) = 0.0_dp
 
     pc%accel_function => accel_func
-    call pc%initialize(UC_elec_mass, n_part_max)
+    if (all(rng_seed == 0)) then
+       call pc%initialize(UC_elec_mass, n_part_max)
+    else
+       call pc%initialize(UC_elec_mass, n_part_max, rng_seed)
+    end if
+
     call pc%use_cross_secs(max_eV, tbl_size, cross_secs)
 
     pc%outside_check => outside_check

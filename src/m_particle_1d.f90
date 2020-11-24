@@ -320,13 +320,14 @@ contains
        call update_ion_density(dt)
     end if
 
+    ! Handle ionization events etc.
+    call handle_events(pc)
+
     call PM_update_efield(time)
 
     ! Update acceleration and correct positions and velocities
     call pc%after_mover(dt)
 
-    ! Handle ionization events etc.
-    call handle_events(pc)
     n_out = pc%get_num_sim_part()
 
     if (n_out > PM_merge_factor * merge_prev_npart) then

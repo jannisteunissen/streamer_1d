@@ -18,6 +18,8 @@ def getArgs():
     parser = argparse.ArgumentParser(description="Converter for Bolsig+ data")
     parser.add_argument("infile", type=str, help="input file")
     parser.add_argument("outfile", type=str, help="output file")
+    parser.add_argument("-bulk", default=False,
+                        action='store_true', help="Use bulk coefficients")
     parser.add_argument("-T", type=float, default=300.,
                         help="Gas temperature (K)")
     parser.add_argument("-p", type=float,
@@ -37,11 +39,21 @@ def convert():
     Efield_label = 'E/N(Td)'
     match = re.search(r'(A\S*).*Mean energy \(eV\)', fr)
     eV_label = match.group(1)
-    match = re.search(r'(A\S*).*Mobility \*N \(1\/m\/V\/s\)', fr)
+
+    if cfg.bulk:
+        match = re.search(r'(A\S*)\s*Bulk mobility \*N \(1\/m\/V\/s\)', fr)
+    else:
+        match = re.search(r'(A\S*)\s*Mobility \*N \(1\/m\/V\/s\)', fr)
     mu_label = match.group(1)
-    match = re.search(r'(A\S*).*Diffusion coefficient'
-                      + r' \*N \(1\/m\/s\)', fr)
+
+    if cfg.bulk:
+        match = re.search(r'(A\S*)\s*Bulk L diffusion coef.'
+                          + r' \*N \(1\/m\/s\)', fr)
+    else:
+        match = re.search(r'(A\S*)\s*Diffusion coefficient'
+                          + r' \*N \(1\/m\/s\)', fr)
     dc_label = match.group(1)
+
     match = re.search(r'(A\S*).*Townsend ioniz. coef. alpha/N \(m2\)', fr)
     alpha_label = match.group(1)
     eta_label = 'I_DO_NOT_EXIST?'
@@ -82,7 +94,7 @@ def convert():
     boltzmann_const = 1.3806488e-23
     gas_num_dens = cfg.p * 1e5 / (boltzmann_const * cfg.T)
 
-    print("Gas temperature %.3e Kelvin" % (cfg.T))
+    print("Gas temperature  %.3e Kelvin" % (cfg.T))
     print("Gas pressure     %.3e bar" % (cfg.p))
     print("Gas #density     %.3e /m3" % (gas_num_dens))
 
@@ -103,12 +115,12 @@ def convert():
                     tbl_data[:, dc_col], f)
         write_entry(r'efield[V/m]_vs_alpha[1/m]', tbl_data[:, Efield_col],
                     tbl_data[:, alpha_col], f)
+        write_entry(r'efield[V/m]_vs_energy[eV]',
+                    tbl_data[:, Efield_col], tbl_data[:, eV_col], f)
         if (eta_col != -1):
             tbl_data[:, eta_col] = tbl_data[:, eta_col] * gas_num_dens
             write_entry(r'efield[V/m]_vs_eta[1/m]',
                         tbl_data[:, Efield_col], tbl_data[:, eta_col], f)
-            write_entry(r'efield[V/m]_vs_energy[eV]',
-                        tbl_data[:, Efield_col], tbl_data[:, eV_col], f)
 
 
 def write_entry(entry_name, x_data, y_data, f):

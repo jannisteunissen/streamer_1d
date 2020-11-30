@@ -30,7 +30,7 @@ module m_init_cond
   real(dp) :: init_background_density = 0.0e9_dp
 
   !> Initial energy for particles
-  real(dp) :: init_energy = 1.0_dp
+  real(dp), protected, public :: init_energy = 0.0_dp
 
   public :: init_initialize
   public :: init_pos_ion_dens
@@ -71,6 +71,8 @@ contains
          "Initial condition density (1/m^3)")
     call CFG_add_get(cfg, "init%location", init_location, &
          "Initial condition location (m)")
+    call CFG_add_get(cfg, "init%energy_eV", init_energy, &
+         "Initial particle energy (eV)")
     call CFG_add_get(cfg, "init%background_density", &
          init_background_density, "Initial background density (1/m^3)")
   end subroutine init_initialize

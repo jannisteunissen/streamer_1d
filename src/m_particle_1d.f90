@@ -78,7 +78,7 @@ contains
     integer                 :: n, i, num_part, tbl_size
     integer                 :: rng_seed(4)
     real(dp)                :: x, sum_elec_dens, max_elec_dens
-    real(dp)                :: elec_dens, ion_dens
+    real(dp)                :: elec_dens, ion_dens, v_norm
     real(dp)                :: pos(3), vel(3), accel(3), max_eV
 
     cs_file             = "input/cross_sections_siglo.txt"
@@ -186,9 +186,13 @@ contains
 
        num_part = nint(elec_dens * PM_cell_volume)
 
-       ! Uniform position in the cell
        pos(2:3) = [0.0_dp, 0.0_dp]
-       vel(:)   = 0
+
+       ! Generate isotropic velocity distribution function, with each particle
+       ! having exactly the initial energy
+       v_norm = UC_en_to_vel(init_energy * UC_elec_volt, UC_elec_mass)
+       vel = pc%rng%sphere(v_norm)
+
        ! Accel is set after computing electric field
        accel(:) = 0.0_dp
 

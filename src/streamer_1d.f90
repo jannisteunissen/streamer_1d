@@ -130,12 +130,8 @@ contains
   real(dp) function get_new_dt(dt, dt_limit)
     real(dp), intent(in) :: dt, dt_limit
 
-    if (dt > dt_limit) then
-       get_new_dt = dt_limit
-    else
-       ! Increase time step at most by 10%
-       get_new_dt = min(1.1_dp * dt, dt_limit)
-    end if
+    ! Increase time step at most by 10%
+    get_new_dt = max(dt_min, min(1.1_dp * dt, dt_limit, dt_max))
   end function get_new_dt
 
 end program

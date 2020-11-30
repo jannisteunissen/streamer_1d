@@ -180,7 +180,7 @@ contains
 
     ! Initialization of electron and ion density
     do n = 1, domain_nx
-       x         = (n - 1) * domain_dx
+       x         = (n - 0.5_dp) * domain_dx
        elec_dens = init_elec_dens(x)
        ion_dens  = init_pos_ion_dens(x)
 

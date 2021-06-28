@@ -94,7 +94,7 @@ contains
     real(dp), allocatable      :: x_data(:), y_data(:)
     character(len=100)         :: data_name
     character(len=40)          :: integrator, source_method
-    logical                    :: found
+    logical                    :: found, outside_range
 
     input_file          = "input/n2_transport_data_siglo.txt"
     table_size          = 1000
@@ -177,18 +177,21 @@ contains
     call CFG_get(cfg, "fluid%fld_mob", data_name)
     call TD_get_td_from_file(input_file, &
          trim(data_name), x_data, y_data)
+    outside_range = (maxval(x_data) < fluid_max_field)
     call LT_add_col(fluid_lkp_fld, x_data, y_data)
     ix_mob = fluid_lkp_fld%n_cols
 
     call CFG_get(cfg, "fluid%fld_dif", data_name)
     call TD_get_td_from_file(input_file, &
          trim(data_name), x_data, y_data)
+    outside_range = outside_range .or. (maxval(x_data) < fluid_max_field)
     call LT_add_col(fluid_lkp_fld, x_data, y_data)
     ix_diff = fluid_lkp_fld%n_cols
 
     call CFG_get(cfg, "fluid%fld_alpha", data_name)
     call TD_get_td_from_file(input_file, &
          trim(data_name), x_data, y_data)
+    outside_range = outside_range .or. (maxval(x_data) < fluid_max_field)
     call LT_add_col(fluid_lkp_fld, x_data, y_data)
     ix_alpha = fluid_lkp_fld%n_cols
 
@@ -196,8 +199,15 @@ contains
     call TD_get_td_from_file(input_file, &
          trim(data_name), x_data, y_data, found)
     if (found) then
+       outside_range = outside_range .or. (maxval(x_data) < fluid_max_field)
        call LT_add_col(fluid_lkp_fld, x_data, y_data)
        ix_eta = fluid_lkp_fld%n_cols
+    end if
+
+    if (outside_range) then
+       print *, "At least some of the input data was not specified"
+       print *, "up to fluid%table_max_efield", fluid_max_field
+       error stop
     end if
 
     fluid_num_fld_coef = fluid_lkp_fld%n_cols

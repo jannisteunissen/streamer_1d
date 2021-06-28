@@ -54,6 +54,9 @@ module m_fluid_1d
   !> Set density to zero below this value
   real(dp) :: fluid_small_density = 1.0_dp
 
+  !> Safety factor (< 1) for the time step
+  real(dp) :: fluid_dt_factor = 0.9_dp
+
   ! Extrapolation coefficients for transport data
   real(dp) :: extrap_src_dydx
   real(dp) :: extrap_src_y0
@@ -122,6 +125,8 @@ contains
     call CFG_add(cfg, "fluid%fld_eta", "efield[V/m]_vs_eta[1/m]", &
          "The name of the eff. attachment coeff.")
 
+    call CFG_add_get(cfg, "fluid%dt_factor", fluid_dt_factor, &
+         "Safety factor (< 1) for the time step")
     call CFG_add_get(cfg, "fluid%limit_velocity", fluid_limit_velocity, &
          "If true, keep the velocity constant for E > table_max_efield")
 
@@ -494,8 +499,8 @@ contains
        ! combination with the explicit trapezoidal rule
        dt_max = min(0.5_dp * dt_cfl, 1/(1/dt_cfl + 1/dt_dif))
 
-       ! Use a 'safety' factor of 0.9
-       dt_max = 0.9_dp * min(dt_max, dt_drt)
+       ! Use a 'safety' factor
+       dt_max = fluid_dt_factor * min(dt_max, dt_drt)
     end if
   end subroutine fluid_derivs
 

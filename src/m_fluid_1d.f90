@@ -2,6 +2,7 @@
 module m_fluid_1d
   use m_generic
   use m_lookup_table
+  use m_units_constants
 
   implicit none
   private
@@ -16,10 +17,14 @@ module m_fluid_1d
   integer, parameter :: rk4              = 4
   integer            :: time_step_method = rk2
 
-  integer, parameter :: num_arrays = 3
+  ! HTODO: Modify this to adjust when using LFA or LEA
+  integer, parameter :: num_arrays = 5
   integer, parameter :: iv_elec    = 1
   integer, parameter :: iv_pion    = 2
   integer, parameter :: iv_nion    = 3
+  integer, parameter :: iv_source    = 4
+  integer, parameter :: iv_en = 5
+
 
   integer, parameter :: num_scalars = 4
   integer, parameter :: i_lbound_elec = 1
@@ -28,13 +33,17 @@ module m_fluid_1d
   integer, parameter :: i_rbound_pion = 4
 
   logical :: fluid_limit_velocity = .false.
+  logical :: fluid_use_LEA = .false.
 
   ! Indices for the transport coefficients
   integer :: ix_mob             = -1   ! Mobility
   integer :: ix_diff            = -1  ! Diffusion
   integer :: ix_alpha           = -1 ! Ionization
   integer :: ix_eta             = -1   ! Attachment
+  integer :: ix_energy          = -1   ! Electron mean Energy
+  integer :: ix_loss            = -1   !Electron energy losses due to collisions
   integer :: fluid_num_fld_coef = -1
+  integer :: fluid_num_en_coef  = -1
 
   type state_t
      real(dp), allocatable :: a(:, :) ! arrays
@@ -43,10 +52,13 @@ module m_fluid_1d
 
   type(state_t) :: fluid_state
 
-  type(LT_t) :: fluid_lkp_fld
+  type(LT_t) :: fluid_lkp_fld, fluid_lkp_en
 
   !> Maximum electric field for the transport data table
   real(dp) :: fluid_max_field = 2.5e7_dp
+
+  !> Maximum electron energy for the transport data table
+  real(dp) :: fluid_max_en = 2.5e2_dp
 
   !> Disable diffusion parallel to fields above this threshold (V/m)
   real(dp) :: fluid_diffusion_emax = huge_value
@@ -56,6 +68,7 @@ module m_fluid_1d
 
   !> Safety factor (< 1) for the time step
   real(dp) :: fluid_dt_factor = 0.9_dp
+
 
   ! Extrapolation coefficients for transport data
   real(dp) :: extrap_src_dydx
@@ -98,6 +111,7 @@ contains
     character(len=100)         :: data_name
     character(len=40)          :: integrator, source_method
     logical                    :: found, outside_range
+    real(dp), allocatable      :: init_charge(:)
 
     input_file          = "input/n2_transport_data_siglo.txt"
     table_size          = 1000
@@ -116,15 +130,36 @@ contains
     call CFG_add_get(cfg, "fluid%integrator", integrator, &
          "Time integrator (euler, trapezoidal, rk2, rk4)")
 
-    call CFG_add(cfg, "fluid%fld_mob", "efield[V/m]_vs_mu[m2/Vs]", &
-         "The name of the mobility coefficient")
-    call CFG_add(cfg, "fluid%fld_dif", "efield[V/m]_vs_dif[m2/s]", &
-         "The name of the diffusion coefficient")
-    call CFG_add(cfg, "fluid%fld_alpha", "efield[V/m]_vs_alpha[1/m]", &
-         "The name of the eff. ionization coeff.")
-    call CFG_add(cfg, "fluid%fld_eta", "efield[V/m]_vs_eta[1/m]", &
-         "The name of the eff. attachment coeff.")
+    ! CFG settings added for the LEA 
+    call CFG_add_get(cfg, "fluid%use_LEA", fluid_use_LEA, &
+       "Whether to use the LEA or LFA(default)")
+    call CFG_add_get(cfg, "fluid%table_max_e_energy", fluid_max_en, &
+         "Maximum electron energy in transport coefficient table")
 
+    if (fluid_use_LEA) then
+      call CFG_add(cfg, "fluid%en_mob", "energy[eV]_vs_mu[m2/Vs]", &
+            "The name of the mobility coefficient")
+      call CFG_add(cfg, "fluid%en_dif", "energy[eV]_vs_dif[m2/s]", &
+            "The name of the diffusion coefficient")
+      call CFG_add(cfg, "fluid%en_alpha", "energy[eV]_vs_alpha[1/m]", &
+            "The name of the eff. ionization coeff.")
+      call CFG_add(cfg, "fluid%en_eta", "energy[eV]_vs_eta[1/m]", &
+            "The name of the eff. attachment coeff.")
+      call CFG_add(cfg, "fluid%en_loss", "energy[eV]_vs_loss[eV/s]", &
+            "The name of the  energy losses due to collisions")
+    else
+      call CFG_add(cfg, "fluid%fld_mob", "efield[V/m]_vs_mu[m2/Vs]", &
+            "The name of the mobility coefficient")
+      call CFG_add(cfg, "fluid%fld_dif", "efield[V/m]_vs_dif[m2/s]", &
+            "The name of the diffusion coefficient")
+      call CFG_add(cfg, "fluid%fld_alpha", "efield[V/m]_vs_alpha[1/m]", &
+            "The name of the eff. ionization coeff.")
+      call CFG_add(cfg, "fluid%fld_eta", "efield[V/m]_vs_eta[1/m]", &
+            "The name of the eff. attachment coeff.")
+    end if
+
+    call CFG_add(cfg, "fluid%fld_energy", "efield[V/m]_vs_energy[eV]", &
+         "The name of the electron energy")
     call CFG_add_get(cfg, "fluid%dt_factor", fluid_dt_factor, &
          "Safety factor (< 1) for the time step")
     call CFG_add_get(cfg, "fluid%limit_velocity", fluid_limit_velocity, &
@@ -172,65 +207,134 @@ contains
     n = n_ghost_cells
     allocate(fluid_state%a(1-n:domain_nx+n, num_arrays))
     allocate(fluid_state%s(num_scalars))
+    allocate(init_charge(1:domain_nx))
 
     fluid_state%a(:, :) = 0.0_dp
     fluid_state%s(:)    = 0.0_dp
 
     ! Create a lookup table for the model coefficients
     fluid_lkp_fld = LT_create(0.0_dp, fluid_max_field, table_size, 0)
-
-    call CFG_get(cfg, "fluid%fld_mob", data_name)
+    call CFG_get(cfg, "fluid%fld_energy", data_name)
     call TD_get_td_from_file(input_file, &
-         trim(data_name), x_data, y_data)
+          trim(data_name), x_data, y_data)
     outside_range = (maxval(x_data) < fluid_max_field)
     call LT_add_col(fluid_lkp_fld, x_data, y_data)
-    ix_mob = fluid_lkp_fld%n_cols
+    ix_energy = fluid_lkp_fld%n_cols
+    fluid_num_fld_coef = fluid_lkp_fld%n_cols
+    ! Below is the conditional for LEA transport data or LFA transport data
+    if (fluid_use_LEA) then
+      fluid_lkp_en = LT_create(0.0_dp, fluid_max_en, table_size, 0)
+      call CFG_get(cfg, "fluid%en_mob", data_name)
+      call TD_get_td_from_file(input_file, &
+            trim(data_name), x_data, y_data)
+      outside_range = (maxval(x_data) < fluid_max_en)
+      call LT_add_col(fluid_lkp_en, x_data, y_data)
+      ix_mob = fluid_lkp_en%n_cols
+   
+      call CFG_get(cfg, "fluid%en_dif", data_name)
+      call TD_get_td_from_file(input_file, &
+            trim(data_name), x_data, y_data)
+      outside_range = outside_range .or. (maxval(x_data) < fluid_max_en)
+      call LT_add_col(fluid_lkp_en, x_data, y_data)
+      ix_diff = fluid_lkp_en%n_cols
+   
+      call CFG_get(cfg, "fluid%en_alpha", data_name)
+      call TD_get_td_from_file(input_file, &
+            trim(data_name), x_data, y_data)
+      outside_range = outside_range .or. (maxval(x_data) < fluid_max_en)
+      call LT_add_col(fluid_lkp_en, x_data, y_data)
+      ix_alpha = fluid_lkp_en%n_cols
 
-    call CFG_get(cfg, "fluid%fld_dif", data_name)
-    call TD_get_td_from_file(input_file, &
-         trim(data_name), x_data, y_data)
-    outside_range = outside_range .or. (maxval(x_data) < fluid_max_field)
-    call LT_add_col(fluid_lkp_fld, x_data, y_data)
-    ix_diff = fluid_lkp_fld%n_cols
+      call CFG_get(cfg, "fluid%en_loss", data_name)
+      call TD_get_td_from_file(input_file, &
+            trim(data_name), x_data, y_data)
+      outside_range = outside_range .or. (maxval(x_data) < fluid_max_en)
+      call LT_add_col(fluid_lkp_en, x_data, y_data)
+      ix_loss = fluid_lkp_en%n_cols
 
-    call CFG_get(cfg, "fluid%fld_alpha", data_name)
-    call TD_get_td_from_file(input_file, &
-         trim(data_name), x_data, y_data)
-    outside_range = outside_range .or. (maxval(x_data) < fluid_max_field)
-    call LT_add_col(fluid_lkp_fld, x_data, y_data)
-    ix_alpha = fluid_lkp_fld%n_cols
+      call CFG_get(cfg, "fluid%en_eta", data_name)
+      call TD_get_td_from_file(input_file, &
+            trim(data_name), x_data, y_data, found)
+      if (found) then
+         outside_range = outside_range .or. & 
+            (maxval(x_data) < fluid_max_en)
+         call LT_add_col(fluid_lkp_fld, x_data, y_data)
+         ix_eta = fluid_lkp_en%n_cols
+      end if
+      fluid_num_en_coef = fluid_lkp_en%n_cols
+    else
+      call CFG_get(cfg, "fluid%fld_mob", data_name)
+      call TD_get_td_from_file(input_file, &
+            trim(data_name), x_data, y_data)
+      outside_range = (maxval(x_data) < fluid_max_field)
+      call LT_add_col(fluid_lkp_fld, x_data, y_data)
+      ix_mob = fluid_lkp_fld%n_cols
+   
+      call CFG_get(cfg, "fluid%fld_dif", data_name)
+      call TD_get_td_from_file(input_file, &
+            trim(data_name), x_data, y_data)
+      outside_range = outside_range .or. (maxval(x_data) < fluid_max_field)
+      call LT_add_col(fluid_lkp_fld, x_data, y_data)
+      ix_diff = fluid_lkp_fld%n_cols
+   
+      call CFG_get(cfg, "fluid%fld_alpha", data_name)
+      call TD_get_td_from_file(input_file, &
+            trim(data_name), x_data, y_data)
+      outside_range = outside_range .or. (maxval(x_data) < fluid_max_field)
+      call LT_add_col(fluid_lkp_fld, x_data, y_data)
+      ix_alpha = fluid_lkp_fld%n_cols
 
-    call CFG_get(cfg, "fluid%fld_eta", data_name)
-    call TD_get_td_from_file(input_file, &
-         trim(data_name), x_data, y_data, found)
-    if (found) then
-       outside_range = outside_range .or. (maxval(x_data) < fluid_max_field)
-       call LT_add_col(fluid_lkp_fld, x_data, y_data)
-       ix_eta = fluid_lkp_fld%n_cols
+
+      call CFG_get(cfg, "fluid%fld_eta", data_name)
+      call TD_get_td_from_file(input_file, &
+            trim(data_name), x_data, y_data, found)
+      if (found) then
+         outside_range = outside_range .or. (maxval(x_data) < fluid_max_field)
+         call LT_add_col(fluid_lkp_fld, x_data, y_data)
+         ix_eta = fluid_lkp_fld%n_cols
+      end if
+      fluid_num_fld_coef = fluid_lkp_fld%n_cols
     end if
+
 
     if (outside_range) then
        print *, "At least some of the input data was not specified"
        print *, "up to fluid%table_max_efield", fluid_max_field
+       print *, "OR"
+       print *, "up to fluid%table_max_e_energy", fluid_max_en
        error stop
     end if
 
-    fluid_num_fld_coef = fluid_lkp_fld%n_cols
 
-    ! Determine extrapolation coefficients for transport data
-    x = [fluid_max_field, 0.8_dp * fluid_max_field]
-
-    ! Linear extrapolation for ionization coefficient
-    y = LT_get_col(fluid_lkp_fld, ix_alpha, x)
-
-    extrap_src_dydx = (y(2) - y(1)) / (x(2) - x(1))
-    extrap_src_y0   = y(2)
-
-    ! Exponential decay for mobility: mu = c0 * exp(-c1 * E)
-    y = LT_get_col(fluid_lkp_fld, ix_mob, x)
+    if (fluid_use_LEA) then
+      ! Determine extrapolation coefficients for transport data
+      x = [fluid_max_en, 0.8_dp * fluid_max_en]
+   
+      ! Linear extrapolation for ionization coefficient
+      y = LT_get_col(fluid_lkp_en, ix_alpha, x)
+   
+      extrap_src_dydx = (y(2) - y(1)) / (x(2) - x(1))
+      extrap_src_y0   = y(2)
+   
+      ! Exponential decay for mobility: mu = c0 * exp(-c1 * E)
+      y = LT_get_col(fluid_lkp_en, ix_mob, x)
+    else
+      ! Determine extrapolation coefficients for transport data
+      x = [fluid_max_field, 0.8_dp * fluid_max_field]
+   
+      ! Linear extrapolation for ionization coefficient
+      y = LT_get_col(fluid_lkp_fld, ix_alpha, x)
+   
+      extrap_src_dydx = (y(2) - y(1)) / (x(2) - x(1))
+      extrap_src_y0   = y(2)
+   
+      ! Exponential decay for mobility: mu = c0 * exp(-c1 * E)
+      y = LT_get_col(fluid_lkp_fld, ix_mob, x)
+    end if
 
     extrap_mob_c1 = -log(y(2)/y(1)) / (x(2) - x(1))
     extrap_mob_c0 = y(2) / exp(-extrap_mob_c1 * x(2))
+
 
     ! Initialization of electron and ion density
     do n = 1, domain_nx
@@ -238,7 +342,21 @@ contains
        fluid_state%a(n, iv_elec) = init_elec_dens(xx)
        fluid_state%a(n, iv_pion) = init_pos_ion_dens(xx)
        fluid_state%a(n, iv_nion) = 0.0_dp
+       fluid_state%a(n, iv_en) = 0.0_dp
     end do
+    ! Computing the initial field with 0 surface charge to initialize
+    ! initial electron energy when using LEA
+    init_charge = UC_elem_charge * (fluid_state%a(1:domain_nx, iv_pion) - & 
+                  fluid_state%a(1:domain_nx, iv_elec)- &
+                  fluid_state%a(1:domain_nx, iv_nion))
+    call compute_field(init_charge, (/0.0_dp, 0.0_dp/), 0.0_dp)
+    if (fluid_use_LEA) then
+      do n = 1, domain_nx
+            xx = (n-0.5_dp) * domain_dx
+            fluid_state%a(n, iv_en) = fluid_state%a(n, iv_elec)* &
+               LT_get_col(fluid_lkp_fld, ix_energy, get_field_at(xx))
+      end do
+   end if
 
   end subroutine fluid_initialize
 
@@ -246,25 +364,30 @@ contains
   !> TODO: implement this more flexibly
   subroutine set_boundary_conditions(state)
     type(state_t), intent(inout) :: state
+    integer                      :: idx, iter(2)
 
-    if (dielectric_present(1)) then
-       ! Inside dielectric, density is zero
-       state%a(0, iv_elec) = 0.0_dp
-       state%a(-1, iv_elec) = 0.0_dp
-    else
-       ! Neumann boundary condition on the left
-       state%a(0, iv_elec) = state%a(1, iv_elec)
-       state%a(-1, iv_elec) = state%a(2, iv_elec)
-    end if
-
-    if (dielectric_present(2)) then
-       state%a(domain_nx+1, iv_elec) = 0.0_dp
-       state%a(domain_nx+2, iv_elec) = 0.0_dp
-    else
-       ! Neumann boundary condition on the right
-       state%a(domain_nx+1, iv_elec) = state%a(domain_nx, iv_elec)
-       state%a(domain_nx+2, iv_elec) = state%a(domain_nx-1, iv_elec)
-    end if
+    ! iv_en will just be a 0 array in LFA, so this need not be changed
+    iter = (/iv_elec, iv_en/)
+    do idx = 1,2
+      if (dielectric_present(1)) then
+         ! Inside dielectric, density is zero
+         state%a(0, iter(idx)) = 0.0_dp
+         state%a(-1, iter(idx)) = 0.0_dp
+      else
+         ! Neumann boundary condition on the left
+         state%a(0, iter(idx)) = state%a(1, iter(idx))
+         state%a(-1, iter(idx)) = state%a(2, iter(idx))
+      end if
+   
+      if (dielectric_present(2)) then
+         state%a(domain_nx+1, iter(idx)) = 0.0_dp
+         state%a(domain_nx+2, iter(idx)) = 0.0_dp
+      else
+         ! Neumann boundary condition on the right
+         state%a(domain_nx+1, iter(idx)) = state%a(domain_nx, iter(idx))
+         state%a(domain_nx+2, iter(idx)) = state%a(domain_nx-1, iter(idx))
+      end if
+   end do
 
   end subroutine set_boundary_conditions
 
@@ -279,16 +402,21 @@ contains
     real(dp), intent(out), optional :: dt_max
 
     type(LT_loc_t), allocatable :: fld_locs(:), fld_locs_cc(:)
+    type(LT_loc_t), allocatable :: en_locs(:), en_locs_cc(:)
     integer                     :: n, nx
     real(dp)                    :: surface_charge(2), se
-    real(dp), allocatable       :: mob_e(:), diff_e(:), src_e(:)
+    real(dp), allocatable       :: mob_e(:), diff_e(:), src_e(:), loss_e(:), loss_e_cc(:)
+    real(dp), allocatable       :: mean_en(:), elec_fc(:), fld_en(:)
+    real(dp), allocatable       :: fld_en_cc(:), mean_en_cc(:)
     real(dp), allocatable       :: mob_i(:), diff_i(:), mob_cc(:)
     real(dp), allocatable       :: flux(:), flux_d(:), max_flux(:)
+    real(dp), allocatable       :: flux_ene(:), flux_ene_d(:)
     real(dp), allocatable       :: source(:), tmp_vec(:), src_fac(:)
+    real(dp), allocatable       :: source_ene(:) 
     real(dp), allocatable       :: sigma(:)
     real(dp)                    :: dt_cfl, dt_dif, dt_drt
     real(dp)                    :: drt_fac, tmp
-    real(dp), parameter         :: eps = 1e-100_dp
+    real(dp), parameter         :: eps = 1e-100_dp, five_third = 5/3.0_dp
 
     nx = domain_nx
 
@@ -297,10 +425,21 @@ contains
 
     call set_boundary_conditions(state)
 
+    allocate(source(1:nx))
     allocate(flux(1:nx+1))
     allocate(flux_d(1:nx+1))
     allocate(mob_i(nx+1))
     allocate(diff_i(nx+1))
+
+    if (fluid_use_LEA) then
+      allocate(flux_ene(1:nx+1))
+      allocate(flux_ene_d(1:nx+1))
+      allocate(source_ene(1:nx))
+      allocate(loss_e_cc(1:nx))
+      allocate(mean_en(1:nx+1))
+      allocate(elec_fc(1:nx+1))
+      allocate(fld_en(1:nx+1))
+    end if
 
     ! Get electric field
     source = UC_elem_charge * (state%a(1:nx, iv_pion) - state%a(1:nx, iv_elec) &
@@ -312,20 +451,45 @@ contains
 
     ! Get locations in the lookup table
     fld_locs = LT_get_loc(fluid_lkp_fld, abs(field_fc))
+    if (fluid_use_LEA) then
+      ! Obtain energy values corresponding to the field values as fc
+      fld_en = LT_get_col_at_loc(fluid_lkp_fld, ix_energy, fld_locs)
+      call cell_center_to_face(state%a(0:nx+1, iv_en), mean_en)
+      call cell_center_to_face(state%a(0:nx+1, iv_elec), elec_fc)
+      mean_en = (mean_en + fluid_small_density*fld_en) / &
+                (elec_fc + fluid_small_density)
+      ! Below is an alternative approach to the above method
+      ! without using cc-fc conversion
+      !mean_en = (state%a(0:nx, iv_en) + state%a(1:nx+1, iv_en) + &
+      !          2*fluid_small_density *fld_en) / &
+      !          (state%a(0:nx, iv_elec) + state%a(1:nx+1, iv_elec) + &
+      !          2 * fluid_small_density)
+      en_locs = LT_get_loc(fluid_lkp_en, mean_en)
+      ! Get LEA transport coefficients
+      mob_e  = LT_get_col_at_loc(fluid_lkp_en, ix_mob, en_locs)
+      diff_e = LT_get_col_at_loc(fluid_lkp_en, ix_diff, en_locs)
+      ! Extrapolate coefficients
+      where (abs(mean_en) > fluid_max_en)
+         mob_e = extrap_mob(abs(mean_en))
+      end where
+    else
+      ! Get LFA transport coefficients
+      mob_e  = LT_get_col_at_loc(fluid_lkp_fld, ix_mob, fld_locs)
+      diff_e = LT_get_col_at_loc(fluid_lkp_fld, ix_diff, fld_locs)
 
-    ! Get coefficients
-    mob_e  = LT_get_col_at_loc(fluid_lkp_fld, ix_mob, fld_locs)
-    diff_e = LT_get_col_at_loc(fluid_lkp_fld, ix_diff, fld_locs)
+      ! Extrapolate coefficients
+      where (abs(field_fc) > fluid_max_field)
+         mob_e = extrap_mob(abs(field_fc))
+      end where
+    end if
 
-    ! Extrapolate coefficients
-    where (abs(field_fc) > fluid_max_field)
-       mob_e = extrap_mob(abs(field_fc))
-    end where
+
 
     ! Compute diffusive electron flux
     flux_d = 0
     call add_diff_flux_1d(nx, n_ghost_cells, state%a(:, iv_elec), &
          diff_e, domain_dx, flux_d)
+
 
     if (fluid_diffusion_emax < huge_value) then
        ! If the diffusive flux is parallel to the field, and the field above a
@@ -340,6 +504,19 @@ contains
     call add_drift_flux_1d(nx, n_ghost_cells, state%a(:, iv_elec), &
          -mob_e * field_fc, flux)
 
+    ! Computing advective and diffusive energy fluxes
+    if (fluid_use_LEA) then
+      flux_ene_d = 0
+      call add_diff_flux_1d(nx, n_ghost_cells, state%a(:, iv_en), &
+            diff_e, domain_dx, flux_ene_d)
+   
+      flux_ene = 0
+      call add_drift_flux_1d(nx, n_ghost_cells, state%a(:, iv_en), &
+            -mob_e * field_fc, flux_ene)
+      flux_ene = flux_ene + flux_ene_d
+    end if
+
+   ! Computing the source factor correction terms
     if (fluid_source_method == source_factor) then
        allocate(src_fac(nx))
        src_fac = 1 - (flux_d(1:nx) * sign(1.0_dp, field_fc(1:nx)) + &
@@ -349,7 +526,7 @@ contains
        if (.not. fluid_source_increase) src_fac = min(1.0_dp, src_fac)
     end if
 
-    ! Add fluxes
+    ! Add electron fluxes
     flux = flux + flux_d
 
     if (fluid_avoid_drt) then
@@ -370,12 +547,23 @@ contains
 
     select case (fluid_source_method)
     case (source_flux, source_drift_flux)
-       ! Compute source terms using the fluxes at cell faces
-       src_e = LT_get_col_at_loc(fluid_lkp_fld, ix_alpha, fld_locs)
-
-       ! Remove attachment coefficient from source
-       if (ix_eta > 0) then
-          src_e = src_e - LT_get_col_at_loc(fluid_lkp_fld, ix_eta, fld_locs)
+       if (fluid_use_LEA) then
+         ! Compute source terms using the fluxes at cell faces
+         src_e = LT_get_col_at_loc(fluid_lkp_en, ix_alpha, en_locs)
+         loss_e = LT_get_col_at_loc(fluid_lkp_en, ix_loss, en_locs)
+   
+         ! Remove attachment coefficient from source
+         if (ix_eta > 0) then
+            src_e = src_e - LT_get_col_at_loc(fluid_lkp_en, ix_eta, en_locs)
+         end if
+       else
+         ! Compute source terms using the fluxes at cell faces
+         src_e = LT_get_col_at_loc(fluid_lkp_fld, ix_alpha, fld_locs)
+   
+         ! Remove attachment coefficient from source
+         if (ix_eta > 0) then
+            src_e = src_e - LT_get_col_at_loc(fluid_lkp_fld, ix_eta, fld_locs)
+         end if
        end if
 
        if (fluid_source_method == source_drift_flux) then
@@ -395,13 +583,36 @@ contains
     case (source_centered, source_factor)
        ! Compute source term at cell centers
        fld_locs_cc = LT_get_loc(fluid_lkp_fld, abs(field_cc(1:nx)))
-       src_e       = LT_get_col_at_loc(fluid_lkp_fld, ix_alpha, fld_locs_cc)
-       mob_cc      = LT_get_col_at_loc(fluid_lkp_fld, ix_mob, fld_locs_cc)
+       if (fluid_use_LEA) then
+         error stop "Evaluating source at cell centers for LEA! This doesnt work, evaluate at face centers(fluid%source= flux)"
 
-       ! Remove attachment coefficient from source
-       if (ix_eta > 0) then
-          src_e = src_e - LT_get_col_at_loc(fluid_lkp_fld, ix_eta, fld_locs_cc)
+         !fld_en_cc = LT_get_col_at_loc(fluid_lkp_fld, ix_energy, fld_locs_cc)
+         !mean_en_cc = (state%a(1:nx, iv_en) + &
+         !         fluid_small_density *fld_en_cc) / &
+         !         (state%a(1:nx, iv_elec) + &
+         !         fluid_small_density)
+         !en_locs_cc = LT_get_loc(fluid_lkp_fld, mean_en_cc)
+         !src_e       = LT_get_col_at_loc(fluid_lkp_en, ix_alpha, en_locs_cc)
+         !mob_cc      = LT_get_col_at_loc(fluid_lkp_en, ix_mob, en_locs_cc)
+         !loss_e      = LT_get_col_at_loc(fluid_lkp_en, ix_loss, en_locs_cc)
+         !source_ene = -(field_cc(1:nx)*mob_cc*field_cc(1:nx)) - loss_e*state%a(1:nx, iv_elec)
+   
+         ! Remove attachment coefficient from source
+         !if (ix_eta > 0) then
+         !   src_e = src_e - & 
+         !      LT_get_col_at_loc(fluid_lkp_en, ix_eta, en_locs_cc)
+         !end if
+       else
+         src_e       = LT_get_col_at_loc(fluid_lkp_fld, ix_alpha, fld_locs_cc)
+         mob_cc      = LT_get_col_at_loc(fluid_lkp_fld, ix_mob, fld_locs_cc)
+   
+         ! Remove attachment coefficient from source
+         if (ix_eta > 0) then
+            src_e = src_e - LT_get_col_at_loc(fluid_lkp_fld, ix_eta, fld_locs_cc)
+         end if
+
        end if
+   
 
        source = src_e * abs(mob_cc * field_cc(1:nx) * state%a(1:nx, iv_elec))
 
@@ -410,12 +621,27 @@ contains
        end if
     end select
 
+    
+    ! Computing the energy source term at cell centers
+    if (fluid_use_LEA) then
+      call cell_face_to_center(source_ene, -1*(flux*field_fc))
+      call cell_face_to_center(loss_e_cc, loss_e)
+      source_ene = source_ene - state%a(1:nx, iv_elec)*loss_e_cc
+      derivs%a(1:nx, iv_en) = source_ene
+    else
+      derivs%a(1:nx, iv_en) = 0.0_dp
+    end if
     derivs%a(1:nx, iv_elec) = source
     derivs%a(1:nx, iv_pion) = source
+    derivs%a(1:nx, iv_source) = source
 
     do n = 1, nx
        derivs%a(n, iv_elec) = derivs%a(n, iv_elec) + &
             domain_inv_dx * (flux(n) - flux(n+1))
+      if (fluid_use_LEA) then
+         derivs%a(n, iv_en) = derivs%a(n, iv_en) + &
+               (5.0_dp/3.0_dp)*domain_inv_dx * (flux_ene(n) - flux_ene(n+1))
+      end if
     end do
 
     ! Take into account boundary fluxes
@@ -456,14 +682,25 @@ contains
        derivs%s(i_lbound_pion) = -flux(1)
        derivs%s(i_rbound_pion) = flux(nx+1)
 
+       ! HTODO: Check the correctness of the electron energy BCs
        ! Secondary emission of electrons
        se = max(0.0_dp, -ion_secondary_emission_yield * flux(1))
        derivs%a(1, iv_elec) = derivs%a(1, iv_elec) + se * domain_inv_dx
        derivs%s(i_lbound_elec) = derivs%s(i_lbound_elec) - se
+       ! HTODO:Adding the energy to the system due to the se electrons
+       derivs%a(1, iv_en) = derivs%a(1, iv_en) + &
+            se * domain_inv_dx * &
+            2.0_dp*(derivs%a(1, iv_en)/ &
+            (1.0_dp/huge_value + derivs%a(1, iv_elec)))
 
        se = max(0.0_dp, ion_secondary_emission_yield * flux(nx+1))
        derivs%a(nx, iv_elec) = derivs%a(nx, iv_elec) + se * domain_inv_dx
        derivs%s(i_rbound_elec) = derivs%s(i_rbound_elec) - se
+       ! HTODO:Adding the energy to the system due to the se electrons
+       derivs%a(nx, iv_en) = derivs%a(nx, iv_en) + &
+            se * domain_inv_dx * &
+            2.0_dp*(derivs%a(nx, iv_en)/ &
+            (1.0_dp/huge_value + derivs%a(nx, iv_elec)))
     else
        diff_i(:) = 0.0_dp
        mob_i(:)  = 0.0_dp
@@ -516,6 +753,18 @@ contains
     end do
   end subroutine cell_face_to_center
 
+  !>  Terms defined at cell centers with appropriately filled 
+  !> ghost cells will be averaged to cell face values
+  subroutine cell_center_to_face(cc_vals, fc_vals)
+    real(dp), intent(in) :: cc_vals(:)
+    real(dp), intent(inout)    :: fc_vals(:)
+    integer                 :: n
+
+    do n = 1, size(cc_vals) - 1
+      fc_vals(n) = 0.5_dp*(cc_vals(n) + cc_vals(n+1))
+    end do
+  end subroutine cell_center_to_face
+
   !> Write output files
   subroutine fluid_write_output(base_fname, time, dt, ix)
     use m_units_constants
@@ -524,6 +773,8 @@ contains
     integer, intent(in)          :: ix
     integer                      :: n, nx
     character(len=200)           :: fname
+    type(LT_loc_t), allocatable  :: fld_locs_cc(:)
+    real(dp), allocatable        :: energy_e(:)
     real(dp)                     :: total_charge
     real(dp)                     :: max_field, deriv_max_field
     real(dp), save               :: prev_max_field, prev_time
@@ -534,13 +785,21 @@ contains
     write(fname, "(A,A,I0.6,A)") trim(base_fname), "_fluid_", ix, ".txt"
     open(newunit=my_unit, file=trim(fname))
 
-    write(my_unit, "(A)") "x field electron pos_ion potential"
+    ! Get locations in the lookup table
+    fld_locs_cc = LT_get_loc(fluid_lkp_fld, abs(field_cc))
+
+    energy_e = LT_get_col_at_loc(fluid_lkp_fld, ix_energy, fld_locs_cc)
+    write(my_unit, "(A)") "x field electron pos_ion potential electron_source energy_density mean_energy"
     do n = 1, domain_nx
        write(my_unit, *) domain_dx * (n-0.5_dp), &
             field_cc(n), &
             fluid_state%a(n, iv_elec), &
             fluid_state%a(n, iv_pion), &
-            potential(n)
+            potential(n), &
+            fluid_state%a(n, iv_source), &
+            fluid_state%a(n, iv_en), &
+            (fluid_state%a(n, iv_en) + fluid_small_density*energy_e(n))/ &
+            (fluid_state%a(n, iv_elec) + fluid_small_density)
     end do
     close(my_unit)
 
@@ -550,7 +809,7 @@ contains
     if (ix == 1) then
        open(newunit=my_unit, file=trim(fname))
        write(my_unit, *) "time dt E_max total_charge sum_elec ", &
-            "sum_pion sigma_l sigma_r max_elec max_pion deriv_Emax"
+            "sum_pion sigmapos_l sigmaneg_l sigmapos_r sigmaneg_r max_elec max_pion deriv_Emax"
     else
        open(newunit=my_unit, file=trim(fname), access='append')
     end if
@@ -571,8 +830,8 @@ contains
     write(my_unit, *) time, dt, max_field, total_charge, &
          domain_dx * sum(fluid_state%a(1:nx, iv_elec)), &
          domain_dx * sum(fluid_state%a(1:nx, iv_pion)), &
-         fluid_state%s(i_lbound_pion) - fluid_state%s(i_lbound_elec), &
-         fluid_state%s(i_rbound_pion) - fluid_state%s(i_rbound_elec), &
+         fluid_state%s(i_lbound_pion) , fluid_state%s(i_lbound_elec), &
+         fluid_state%s(i_rbound_pion) , fluid_state%s(i_rbound_elec), &
          maxval(fluid_state%a(1:nx, iv_elec)), &
          maxval(fluid_state%a(1:nx, iv_pion)), deriv_max_field
     close(my_unit)

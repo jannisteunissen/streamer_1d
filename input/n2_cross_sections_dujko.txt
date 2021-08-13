@@ -1,11 +1,9 @@
 COMMENT
-N2
-Data from Sasa Dujko
+N2 Data from Sasa Dujko
 ------------------------------------------
 
 ELASTIC
-N2
-  1.950e-5 / mass ratio
+1.950e-5 / mass ratio
 COMMENT: elastic-mometum-transfer-cross-section
 SCALING: 1.0 1.0e-20
 --------------------------------------------------------------------

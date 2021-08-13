@@ -106,8 +106,8 @@ program streamer_1d
      time = time + dt
   end do
 
-  write(*, "(A,E10.4,A,I0,A,E10.4)") "Simulation end, t = ", 1.0d9 * time, &
-       " ns, it = ", it, ", mean(dt) = ", time / it
+  write(*, "(A,E10.4,A,I0,A,E10.4,A,E10.4)") "Simulation end, t = ", 1.0d9 * time, &
+       " ns, it = ", it, ", mean(dt) = ", time / it, " , elapsed time (sec): ", time_elapsed
 
 contains
 

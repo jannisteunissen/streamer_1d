@@ -777,7 +777,8 @@ contains
     real(dp), allocatable        :: energy_e(:)
     real(dp)                     :: total_charge
     real(dp)                     :: max_field, deriv_max_field
-    real(dp), save               :: prev_max_field, prev_time
+    real(dp)                     :: velocity, max_ne_loc
+    real(dp), save               :: prev_max_field, prev_time, prev_ne_max_loc
     integer                      :: my_unit
 
     nx = domain_nx
@@ -809,7 +810,7 @@ contains
     if (ix == 1) then
        open(newunit=my_unit, file=trim(fname))
        write(my_unit, *) "time dt E_max total_charge sum_elec ", &
-            "sum_pion sigmapos_l sigmaneg_l sigmapos_r sigmaneg_r max_elec max_pion deriv_Emax"
+            "sum_pion sigmapos_l sigmaneg_l sigmapos_r sigmaneg_r max_elec max_pion deriv_Emax velocity"
     else
        open(newunit=my_unit, file=trim(fname), access='append')
     end if
@@ -821,10 +822,18 @@ contains
 
     max_field = maxval(abs(field_fc))
 
+
+    max_ne_loc = domain_dx*(findloc(fluid_state%a(1:nx, iv_elec), & 
+                 maxval(fluid_state%a(1:nx, iv_elec)), dim=1)-0.5_dp)
+
+
     if (ix == 1) then
        deriv_max_field = 0.0_dp
+       velocity = 0.0_dp
     else
        deriv_max_field = (max_field - prev_max_field) / (time - prev_time)
+       velocity = (max_ne_loc - prev_ne_max_loc) / (time - prev_time)
+       print *, "Velocity", velocity
     end if
 
     write(my_unit, *) time, dt, max_field, total_charge, &
@@ -833,10 +842,12 @@ contains
          fluid_state%s(i_lbound_pion) , fluid_state%s(i_lbound_elec), &
          fluid_state%s(i_rbound_pion) , fluid_state%s(i_rbound_elec), &
          maxval(fluid_state%a(1:nx, iv_elec)), &
-         maxval(fluid_state%a(1:nx, iv_pion)), deriv_max_field
+         maxval(fluid_state%a(1:nx, iv_pion)), deriv_max_field, &
+         velocity
     close(my_unit)
 
     prev_max_field = max_field
+    prev_ne_max_loc = max_ne_loc
     prev_time      = time
   end subroutine fluid_write_output
 

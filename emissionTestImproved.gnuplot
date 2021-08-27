@@ -3,7 +3,7 @@ set terminal pngcairo size 1280,1024 enhanced linewidth 2 font "Helvetica, 16"
 set xrange [1.95 : 2]
 do for [i=1:500] {
         set output sprintf("output/emissionLEATest/emissionManyOp_%06d.png", i)
-        set multiplot layout 2,2 columnsfirst title sprintf("t = %.2f ns", (i-1)*0.1)
+        set multiplot layout 3,2 columnsfirst title sprintf("t = %.2f ns", (i-1)*0.1)
         # Electron and Ion density
         set ylabel "density m-3"
         set yrange [-1 : 5e5]
@@ -36,7 +36,7 @@ do for [i=1:500] {
         set ylabel "density m-3"
         set yrange [-1 : 1e5]
         #set log y
-        set key bottom left
+        set key top center
         plot sprintf("output/emissionLEATest/emissionManyOutputs_fluid_000%03.0f.txt", i)\
         using ($1*1e+3):($4-$3)/1e15 with lines lt 1 lw 3 title "LFA ne-ni",\
         sprintf("output/emissionLEATest/emissionManyOutputsLEA_fluid_000%03.0f.txt", i) \
@@ -55,6 +55,18 @@ do for [i=1:500] {
         sprintf("output/emissionLEATest/emissionManyOutputsLEA_fluid_000%03.0f.txt", i) \
         using ($1*1e3):($9/1e15) with lines lt 1 lw 2 lc 3 title "LEA advective",\
         "" using ($1*1e3):($10/1e15) with lines lt 1 lw 2 lc 4 title "LEA diff"
+        unset yrange
+        # Source term
+        set key top center
+        set yrange [-1:1e6]
+        set ylabel "Source term"
+        plot sprintf("output/emissionLEATest/emission_fluid_000%03.0f.txt", i)\
+        using ($1*1e+3):($6/1e15) with lines lt 1 lw 3 title "LFA",\
+        sprintf("output/emissionLEATest/emissionLEA_fluid_000%03.0f.txt", i) \
+        using ($1*1e3):($6/1e15) with lines lt 1 lw 2 lc 6 title "LEA",\
+        sprintf("output/emissionLEATest/emission_particle_000%03.0f.txt", i) \
+        using ($1*1e3):($6/1e15) with lines lt 1 lw 2 lc 2 title "part"
+        unset xlabel
         unset yrange
         unset multiplot
 }

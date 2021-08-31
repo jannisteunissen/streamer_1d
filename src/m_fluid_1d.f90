@@ -18,12 +18,14 @@ module m_fluid_1d
   integer            :: time_step_method = rk2
 
   ! HTODO: Modify this to adjust when using LFA or LEA
-  integer, parameter :: num_arrays = 5
+  integer, parameter :: num_arrays = 7
   integer, parameter :: iv_elec    = 1
   integer, parameter :: iv_pion    = 2
   integer, parameter :: iv_nion    = 3
   integer, parameter :: iv_source    = 4
   integer, parameter :: iv_en = 5
+  integer, parameter :: iv_flux_ad = 6
+  integer, parameter :: iv_flux_dif = 7
 
 
   integer, parameter :: num_scalars = 4
@@ -388,6 +390,30 @@ contains
          state%a(domain_nx+2, iter(idx)) = state%a(domain_nx-1, iter(idx))
       end if
    end do
+   ! Ion motion boundary conditions- only works for positive ions
+
+   if (ion_transport) then
+      if (dielectric_present(1)) then
+         ! Inside dielectric, density is zero
+         state%a(0, iv_pion) = 0.0_dp
+         state%a(-1, iv_pion) = 0.0_dp
+      else
+         ! Neumann boundary condition on the left
+         state%a(0, iv_pion) = state%a(1, iv_pion)
+         state%a(-1, iv_pion) = state%a(2, iv_pion)
+      end if
+   
+      if (dielectric_present(2)) then
+         state%a(domain_nx+1, iv_pion) = 0.0_dp
+         state%a(domain_nx+2, iv_pion) = 0.0_dp
+      else
+         ! Neumann boundary condition on the right
+         state%a(domain_nx+1, iv_pion) = state%a(domain_nx, iv_pion)
+         state%a(domain_nx+2, iv_pion) = state%a(domain_nx-1, iv_pion)
+      end if
+   end if
+      
+
 
   end subroutine set_boundary_conditions
 
@@ -412,11 +438,13 @@ contains
     real(dp), allocatable       :: flux(:), flux_d(:), max_flux(:)
     real(dp), allocatable       :: flux_ene(:), flux_ene_d(:)
     real(dp), allocatable       :: source(:), tmp_vec(:), src_fac(:)
+    real(dp), allocatable       :: flux_ad_cc(:), flux_dif_cc(:), source_fc(:)
     real(dp), allocatable       :: source_ene(:) 
     real(dp), allocatable       :: sigma(:)
     real(dp)                    :: dt_cfl, dt_dif, dt_drt
     real(dp)                    :: drt_fac, tmp
     real(dp), parameter         :: eps = 1e-100_dp, five_third = 5/3.0_dp
+    real(dp), parameter         :: four_third = 4/3.0_dp
 
     nx = domain_nx
 
@@ -426,6 +454,9 @@ contains
     call set_boundary_conditions(state)
 
     allocate(source(1:nx))
+    allocate(flux_ad_cc(1:nx))
+    allocate(flux_dif_cc(1:nx))
+    allocate(source_fc(1:nx+1))
     allocate(flux(1:nx+1))
     allocate(flux_d(1:nx+1))
     allocate(mob_i(nx+1))
@@ -503,6 +534,7 @@ contains
     flux = 0
     call add_drift_flux_1d(nx, n_ghost_cells, state%a(:, iv_elec), &
          -mob_e * field_fc, flux)
+    
 
     ! Computing advective and diffusive energy fluxes
     if (fluid_use_LEA) then
@@ -527,7 +559,12 @@ contains
     end if
 
     ! Add electron fluxes
+
+    !call cell_face_to_center(fluid_state%a(1:nx, iv_flux_ad), abs(flux))
+    fluid_state%a(1:nx, iv_flux_ad) = flux(1:nx)
+    call cell_face_to_center(fluid_state%a(1:nx, iv_flux_dif), flux_d)
     flux = flux + flux_d
+    source_fc = mob_e*abs(field_fc)
 
     if (fluid_avoid_drt) then
        drt_fac = UC_eps0 / max(1e-100_dp, UC_elem_charge * dt)
@@ -565,7 +602,7 @@ contains
             src_e = src_e - LT_get_col_at_loc(fluid_lkp_fld, ix_eta, fld_locs)
          end if
        end if
-
+       !call cell_face_to_center(fluid_state%a(1:nx, iv_source), src_e*source_fc)
        if (fluid_source_method == source_drift_flux) then
           call cell_face_to_center(source, src_e * abs(flux-flux_d))
        else
@@ -584,7 +621,7 @@ contains
        ! Compute source term at cell centers
        fld_locs_cc = LT_get_loc(fluid_lkp_fld, abs(field_cc(1:nx)))
        if (fluid_use_LEA) then
-         error stop "Evaluating source at cell centers for LEA! This doesnt work, evaluate at face centers(fluid%source= flux)"
+         error stop "Evaluating source at cell centers for LEA! This doesnt work, evaluate at face centers(fluid%source_term= flux)"
 
          !fld_en_cc = LT_get_col_at_loc(fluid_lkp_fld, ix_energy, fld_locs_cc)
          !mean_en_cc = (state%a(1:nx, iv_en) + &
@@ -633,7 +670,7 @@ contains
     end if
     derivs%a(1:nx, iv_elec) = source
     derivs%a(1:nx, iv_pion) = source
-    derivs%a(1:nx, iv_source) = source
+    fluid_state%a(1:nx, iv_source) = source
 
     do n = 1, nx
        derivs%a(n, iv_elec) = derivs%a(n, iv_elec) + &
@@ -650,6 +687,7 @@ contains
 
     ! Photon fluxes on left and right sides. Assume photons are not absorbed and
     ! have a 50% chance of going left/right.
+    ! HTODO: Account for electron energy change due to photoemission
     if (se_photons_per_ionization > 0.0_dp) then
        se = 0.5_dp * sum(source) * domain_dx * se_photons_per_ionization
 
@@ -681,6 +719,9 @@ contains
        ! Take into account boundary fluxes
        derivs%s(i_lbound_pion) = -flux(1)
        derivs%s(i_rbound_pion) = flux(nx+1)
+       !if (flux(1) < 0.0_dp) then
+       !print *, "Left ion flux is neg"
+       !end if
 
        ! HTODO: Check the correctness of the electron energy BCs
        ! Secondary emission of electrons
@@ -688,19 +729,27 @@ contains
        derivs%a(1, iv_elec) = derivs%a(1, iv_elec) + se * domain_inv_dx
        derivs%s(i_lbound_elec) = derivs%s(i_lbound_elec) - se
        ! HTODO:Adding the energy to the system due to the se electrons
-       derivs%a(1, iv_en) = derivs%a(1, iv_en) + &
-            se * domain_inv_dx * &
-            2.0_dp*(derivs%a(1, iv_en)/ &
-            (1.0_dp/huge_value + derivs%a(1, iv_elec)))
+       if (fluid_use_LEA) then
+         derivs%a(1, iv_en) = derivs%a(1, iv_en) + &
+               se * domain_inv_dx * &
+               five_third*UC_boltzmann_const*(derivs%a(1, iv_en)/ &
+               (fluid_small_density + derivs%a(1, iv_elec)))
+       end if
 
        se = max(0.0_dp, ion_secondary_emission_yield * flux(nx+1))
+       !if (se > 0.0_dp) then
+       !print *, "Adding ion SE right"
+       !end if
        derivs%a(nx, iv_elec) = derivs%a(nx, iv_elec) + se * domain_inv_dx
        derivs%s(i_rbound_elec) = derivs%s(i_rbound_elec) - se
        ! HTODO:Adding the energy to the system due to the se electrons
-       derivs%a(nx, iv_en) = derivs%a(nx, iv_en) + &
-            se * domain_inv_dx * &
-            2.0_dp*(derivs%a(nx, iv_en)/ &
-            (1.0_dp/huge_value + derivs%a(nx, iv_elec)))
+       if (fluid_use_LEA) then
+         derivs%a(nx, iv_en) = derivs%a(nx, iv_en) + &
+               se * domain_inv_dx * &
+               five_third*UC_boltzmann_const*(derivs%a(nx, iv_en)/ &
+               (fluid_small_density + derivs%a(nx, iv_elec)))
+       end if
+      !call cell_face_to_center(flux_cc, flux_d)
     else
        diff_i(:) = 0.0_dp
        mob_i(:)  = 0.0_dp
@@ -790,7 +839,7 @@ contains
     fld_locs_cc = LT_get_loc(fluid_lkp_fld, abs(field_cc))
 
     energy_e = LT_get_col_at_loc(fluid_lkp_fld, ix_energy, fld_locs_cc)
-    write(my_unit, "(A)") "x field electron pos_ion potential electron_source energy_density mean_energy"
+    write(my_unit, "(A)") "x field electron pos_ion potential electron_source energy_density mean_energy flux_ad flux_diff"
     do n = 1, domain_nx
        write(my_unit, *) domain_dx * (n-0.5_dp), &
             field_cc(n), &
@@ -800,7 +849,9 @@ contains
             fluid_state%a(n, iv_source), &
             fluid_state%a(n, iv_en), &
             (fluid_state%a(n, iv_en) + fluid_small_density*energy_e(n))/ &
-            (fluid_state%a(n, iv_elec) + fluid_small_density)
+            (fluid_state%a(n, iv_elec) + fluid_small_density), &
+            fluid_state%a(n, iv_flux_ad), &
+            fluid_state%a(n, iv_flux_dif)
     end do
     close(my_unit)
 
@@ -833,7 +884,6 @@ contains
     else
        deriv_max_field = (max_field - prev_max_field) / (time - prev_time)
        velocity = (max_ne_loc - prev_ne_max_loc) / (time - prev_time)
-       print *, "Velocity", velocity
     end if
 
     write(my_unit, *) time, dt, max_field, total_charge, &
@@ -935,9 +985,9 @@ contains
        error stop "Unknown time stepping scheme"
     end select
 
-    where (fluid_state%a < fluid_small_density)
-       fluid_state%a = 0.0_dp
-    end where
+    !where (fluid_state%a < fluid_small_density)
+    !   fluid_state%a = 0.0_dp
+    !end where
   end subroutine fluid_advance
 
   !> Extrapolate the ionization coefficient

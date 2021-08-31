@@ -204,7 +204,7 @@ contains
     if (dielectric_present(2)) then
        ! Add contribution of field in right dielectric
        pot_diff = pot_diff - dielectric_width / dielectric_eps * &
-            (field_fc(nx+1) + surface_charge(2))
+            (field_fc(nx+1) + surface_charge(2) / UC_eps0)
     end if
 
     if (voltage_neumann_bc) then
